@@ -143,21 +143,26 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self._build_connection_bar())
 
-        splitter = QSplitter(Qt.Horizontal)
+        # 上下分区：上 = 接收日志；下 = 发送区（左：单次发送 + 快捷发送；右：多条循环发送）
+        splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self._build_log_panel())
 
-        right = QSplitter(Qt.Vertical)
-        right.addWidget(self._build_quick_panel())
-        right.addWidget(self._build_send_panel())
-        right.addWidget(self._build_loop_panel())
-        right.setStretchFactor(0, 0)
-        right.setStretchFactor(1, 0)
-        right.setStretchFactor(2, 1)
-        splitter.addWidget(right)
+        send_row = QSplitter(Qt.Horizontal)
+        send_left = QSplitter(Qt.Vertical)
+        send_left.addWidget(self._build_send_panel())
+        send_left.addWidget(self._build_quick_panel())
+        send_left.setStretchFactor(0, 1)
+        send_left.setStretchFactor(1, 0)
+        send_row.addWidget(send_left)
+        send_row.addWidget(self._build_loop_panel())
+        send_row.setStretchFactor(0, 1)
+        send_row.setStretchFactor(1, 1)
+        send_row.setSizes([560, 660])
+        splitter.addWidget(send_row)
 
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
-        splitter.setSizes([640, 560])
+        splitter.setSizes([420, 300])
         layout.addWidget(splitter, 1)
 
         status = self.statusBar()
@@ -359,7 +364,7 @@ class MainWindow(QMainWindow):
         history_tag = QLabel("历史")
         history_tag.setObjectName("hint")
         self.history_combo = QComboBox()
-        self.history_combo.setFixedWidth(118)
+        self.history_combo.setFixedWidth(96)
         self.history_combo.setToolTip("最近发送记录，选中即可重新填入")
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["文本", "HEX"])
@@ -373,6 +378,7 @@ class MainWindow(QMainWindow):
                 Qt.ToolTipRole,
             )
         self.line_ending_combo.setToolTip("发送时在末尾追加的换行符")
+        self.line_ending_combo.setFixedWidth(86)
         self.escape_cb = QCheckBox("转义")
         self.escape_cb.setChecked(True)
         self.escape_cb.setToolTip("解析 \\n \\r \\t \\0 \\xhh")
@@ -440,7 +446,7 @@ class MainWindow(QMainWindow):
         self.mode_combo_loop = QComboBox()
         self.mode_combo_loop.addItem("顺序轮询", MODE_SEQUENTIAL)
         self.mode_combo_loop.addItem("单条周期", MODE_PER_ITEM)
-        self.mode_combo_loop.setFixedWidth(104)
+        self.mode_combo_loop.setFixedWidth(96)
         self.mode_combo_loop.setToolTip(
             "调度模式\n"
             "顺序轮询：按列表顺序逐条发送，每条发完等待它自己的间隔，到尾后回绕\n"
@@ -818,7 +824,7 @@ class MainWindow(QMainWindow):
     def _refresh_history_combo(self):
         self.history_combo.blockSignals(True)
         self.history_combo.clear()
-        self.history_combo.addItem("（最近发送）", None)
+        self.history_combo.addItem("最近发送", None)
         for entry in self._history:
             text = entry["text"].replace("\n", " ").replace("\r", " ")
             label = f"[HEX] {text}" if entry["is_hex"] else text
@@ -1010,8 +1016,10 @@ class MainWindow(QMainWindow):
         self.send_stats_label.setText(f"{len(payload)} 字节")
 
     def _update_checksum_hint(self, *_):
-        self.checksum_hint.setText(
-            f"模式 {self.mode_combo.currentText()}　校验 {self.checksum_combo.currentText()}"
+        self.checksum_hint.setText("模式·校验共用")
+        self.checksum_hint.setToolTip(
+            f"循环发送共用发送区的设置：模式 {self.mode_combo.currentText()}，"
+            f"校验 {self.checksum_combo.currentText()}"
         )
 
     def _on_auto_send_period_changed(self, value: int):
