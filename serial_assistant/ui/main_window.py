@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
@@ -208,7 +209,8 @@ class MainWindow(QMainWindow):
         self.flow_combo.setToolTip("流控")
         self.flow_combo.setFixedWidth(138)
 
-        self.reconnect_cb = QCheckBox("断线自动重连")
+        self.reconnect_cb = QCheckBox("自动重连")
+        self.reconnect_cb.setToolTip("串口断开后自动尝试重连")
         self.rts_cb = QCheckBox("RTS")
         self.rts_cb.setChecked(True)
         self.rts_cb.setToolTip("手动控制 RTS 电平，可用于复位 MCU / 切换模块模式")
@@ -249,6 +251,9 @@ class MainWindow(QMainWindow):
         row.addWidget(self.dot)
         row.addWidget(self.conn_label)
         row.addWidget(self.open_btn)
+        self.top_cb = QCheckBox("置顶")
+        self.top_cb.setToolTip("窗口保持在其他窗口之上")
+        row.addWidget(self.top_cb)
         row.addWidget(self.theme_btn)
         layout.addLayout(row)
         return panel
@@ -292,7 +297,7 @@ class MainWindow(QMainWindow):
         self.wrap_spin.setRange(20, 5000)
         self.wrap_spin.setSingleStep(20)
         self.wrap_spin.setValue(200)
-        self.wrap_spin.setSuffix(" ms")
+        self.wrap_spin.setToolTip("空闲多少毫秒后自动断行")
 
         self.rx_label = QLabel("RX 0 B")
         self.rx_label.setObjectName("pill")
@@ -308,6 +313,10 @@ class MainWindow(QMainWindow):
         row2.addWidget(self.auto_wrap_cb)
         row2.addWidget(self.wrap_spin)
         row2.addStretch(1)
+        self.save_log_btn = QPushButton("保存数据")
+        self.save_log_btn.setObjectName("ghost")
+        self.save_log_btn.setToolTip("把接收区当前内容另存为文本文件")
+        row2.addWidget(self.save_log_btn)
         row2.addWidget(clear_btn)
         layout.addLayout(row2)
 
@@ -373,9 +382,31 @@ class MainWindow(QMainWindow):
         row.addWidget(self.escape_cb)
         row.addWidget(self.checksum_combo)
         row.addStretch(1)
+        self.clear_send_btn = QPushButton("清空")
+        self.clear_send_btn.setObjectName("ghost")
+        self.clear_send_btn.setToolTip("清空发送框")
+        row.addWidget(self.clear_send_btn)
         row.addWidget(self.send_btn)
         row.addWidget(self.send_file_btn)
         layout.addLayout(row)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        self.auto_send_cb = QCheckBox("定时发送")
+        self.auto_send_cb.setToolTip("按右侧周期反复发送发送框内容")
+        self.auto_send_spin = QSpinBox()
+        self.auto_send_spin.setRange(10, 600000)
+        self.auto_send_spin.setSingleStep(50)
+        self.auto_send_spin.setValue(1000)
+        self.auto_send_spin.setToolTip("定时发送周期，单位毫秒")
+        self.send_stats_label = QLabel("0 字节")
+        self.send_stats_label.setObjectName("pill")
+        self.send_stats_label.setToolTip("本期发送将实际发出的字节数（含换行与校验）")
+        row2.addWidget(self.auto_send_cb)
+        row2.addWidget(self.auto_send_spin)
+        row2.addStretch(1)
+        row2.addWidget(self.send_stats_label)
+        layout.addLayout(row2)
 
         for key in ("Ctrl+Return", "Ctrl+Enter"):
             shortcut = QShortcut(QKeySequence(key), self.tx_text)
@@ -384,6 +415,9 @@ class MainWindow(QMainWindow):
         self._file_timer = QTimer(self)
         self._file_timer.setInterval(FILE_INTERVAL_MS)
         self._file_timer.timeout.connect(self._send_file_tick)
+        self._auto_send_timer = QTimer(self)
+        self._auto_send_timer.setSingleShot(False)
+        self._auto_send_timer.timeout.connect(self._auto_send_tick)
         return panel
 
     def _build_loop_panel(self):
@@ -391,13 +425,12 @@ class MainWindow(QMainWindow):
 
         row1 = QHBoxLayout()
         row1.setSpacing(6)
-        mode_tag = QLabel("调度")
-        mode_tag.setObjectName("hint")
         self.mode_combo_loop = QComboBox()
         self.mode_combo_loop.addItem("顺序轮询", MODE_SEQUENTIAL)
         self.mode_combo_loop.addItem("单条周期", MODE_PER_ITEM)
         self.mode_combo_loop.setFixedWidth(104)
         self.mode_combo_loop.setToolTip(
+            "调度模式\n"
             "顺序轮询：按列表顺序逐条发送，每条发完等待它自己的间隔，到尾后回绕\n"
             "单条周期：每条启用项按自己的周期独立触发"
         )
@@ -420,7 +453,6 @@ class MainWindow(QMainWindow):
         self.loop_btn = QPushButton("开始循环")
         self.loop_btn.setObjectName("primary")
 
-        row1.addWidget(mode_tag)
         row1.addWidget(self.mode_combo_loop)
         row1.addSpacing(6)
         self.uniform_cb = QCheckBox("统一周期")
@@ -429,7 +461,10 @@ class MainWindow(QMainWindow):
         self.period_spin.setRange(1, 600000)
         self.period_spin.setSingleStep(50)
         self.period_spin.setValue(1000)
-        self.period_spin.setSuffix(" ms")
+        self.period_spin.setToolTip("统一周期，单位毫秒")
+        self.checksum_hint = QLabel("校验共用")
+        self.checksum_hint.setObjectName("hint")
+        self.checksum_hint.setToolTip("循环发送与单次发送、快捷发送共用同一个校验设置（在「单次发送」面板选择）")
         row1.addWidget(self.uniform_cb)
         row1.addWidget(self.period_spin)
         row1.addSpacing(6)
@@ -444,6 +479,7 @@ class MainWindow(QMainWindow):
         self.send_once_btn.setObjectName("ghost")
         self.send_once_btn.setToolTip("把勾选的条目按列表顺序各发一遍，不启动循环")
         row2.addWidget(self.send_once_btn)
+        row2.addWidget(self.checksum_hint)
         row2.addStretch(1)
         row2.addWidget(self.save_btn)
         row2.addWidget(self.load_btn)
@@ -466,6 +502,17 @@ class MainWindow(QMainWindow):
         self.open_btn.clicked.connect(self._toggle_port)
         self.send_btn.clicked.connect(self._send_once)
         self.send_file_btn.clicked.connect(self._toggle_send_file)
+        self.clear_send_btn.clicked.connect(self._clear_send)
+        self.save_log_btn.clicked.connect(self._save_receive_log)
+        self.top_cb.toggled.connect(self._toggle_always_on_top)
+        self.auto_send_cb.toggled.connect(self._on_auto_send_toggled)
+        self.auto_send_spin.valueChanged.connect(self._on_auto_send_period_changed)
+        self.tx_text.textChanged.connect(self._update_send_stats)
+        self.mode_combo.currentIndexChanged.connect(self._update_send_stats)
+        self.line_ending_combo.currentIndexChanged.connect(self._update_send_stats)
+        self.checksum_combo.currentIndexChanged.connect(self._update_send_stats)
+        self.checksum_combo.currentIndexChanged.connect(self._update_checksum_hint)
+        self.escape_cb.toggled.connect(self._update_send_stats)
         self.history_combo.activated.connect(self._on_history_selected)
         self.rts_cb.toggled.connect(self._on_control_toggled)
         self.dtr_cb.toggled.connect(self._on_control_toggled)
@@ -524,7 +571,7 @@ class MainWindow(QMainWindow):
                 slot.content,
                 slot.is_hex,
                 True,
-                slot.checksum,
+                CHECKSUM_LABELS.get(self.checksum_combo.currentText(), "none"),
                 str(self.line_ending_combo.currentData()),
             )
         except ValueError as exc:
@@ -606,11 +653,15 @@ class MainWindow(QMainWindow):
 
     def _on_port_closed(self):
         self._flush_pending()
+        if self.auto_send_cb.isChecked():
+            self.auto_send_cb.setChecked(False)
         self._set_conn_state(False, "未连接")
         self._set_loop_ui(False)
 
     def _on_port_lost(self, message: str):
         self._flush_pending()
+        if self.auto_send_cb.isChecked():
+            self.auto_send_cb.setChecked(False)
         self._set_conn_state(False, "已断开")
         self._set_loop_ui(False)
         self._append_line("sys", f"{message}。可勾选「断线自动重连」。")
@@ -647,7 +698,7 @@ class MainWindow(QMainWindow):
         label = KIND_LABELS.get(kind, "SYS")
         stamp = ""
         if self.timestamp_cb.isChecked():
-            stamp = f'<span style="color:{self._theme["sys"]}">[{time.strftime("%H:%M:%S")}] </span>'
+            stamp = f'<span style="color:{self._theme["sys"]}">[{self._timestamp()}] </span>'
         body = html.escape(text)
         self.rx_text.appendHtml(
             f'{stamp}<span style="color:{color};font-weight:600">{label}</span> '
@@ -686,6 +737,11 @@ class MainWindow(QMainWindow):
         self._tx_count += int(count)
         self.tx_label.setText(f"TX {self._tx_count} B")
 
+    @staticmethod
+    def _timestamp() -> str:
+        """毫秒精度时间戳（HH:MM:SS.mmm）。"""
+        return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
     def _write_log(self, tag: str, text: str):
         day = time.strftime("%Y-%m-%d")
         try:
@@ -694,7 +750,7 @@ class MainWindow(QMainWindow):
                 self._log_path = Path(LOG_DIR) / f"serial_{day}.log"
                 self._log_day = day
             with open(self._log_path, "a", encoding="utf-8") as handle:
-                handle.write(f"[{time.strftime('%H:%M:%S')}] {tag} {text}\n")
+                handle.write(f"[{self._timestamp()}] {tag} {text}\n")
         except OSError as exc:
             self.statusBar().showMessage(f"日志写入失败：{exc}")
 
@@ -715,7 +771,7 @@ class MainWindow(QMainWindow):
             self._append_line("tx", bytes_to_hex(payload))
         return True
 
-    def _send_once(self):
+    def _send_once(self, *_args, remember: bool = True):
         text = self.tx_text.toPlainText()
         if not text.strip():
             return
@@ -731,7 +787,7 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self._warn(f"编码错误：{exc}")
             return
-        if self._transmit(payload):
+        if self._transmit(payload) and remember:
             self._push_history(text, is_hex)
 
     def _push_history(self, text: str, is_hex: bool):
@@ -805,9 +861,10 @@ class MainWindow(QMainWindow):
 
     # ---------- 循环发送 ----------
     def _collect_loop_payloads(self):
-        """收集勾选且非空的条目；开启「统一周期」时全部用全局周期（SSCOM 式）。"""
+        """收集勾选且非空的条目；校验与单次发送共用同一设置，统一周期时用全局周期。"""
         uniform = self.uniform_cb.isChecked()
         period = self.period_spin.value()
+        checksum = CHECKSUM_LABELS.get(self.checksum_combo.currentText(), "none")
         items = self.send_table.get_items()
         payloads = []
         for row, item in enumerate(items):
@@ -820,7 +877,7 @@ class MainWindow(QMainWindow):
             payloads.append(
                 {
                     "index": row,
-                    "payload": append_checksum(raw, item.checksum),
+                    "payload": append_checksum(raw, checksum),
                     "interval_ms": period if uniform else item.interval_ms,
                 }
             )
@@ -908,6 +965,69 @@ class MainWindow(QMainWindow):
             self.mode_combo_loop.setCurrentIndex(index)
         self.statusBar().showMessage(f"方案已加载：{path}")
 
+    # ---------- 定时发送与发送辅助 ----------
+    def _clear_send(self):
+        self.tx_text.clear()
+        self.history_combo.setCurrentIndex(0)
+
+    def _update_send_stats(self, *_):
+        try:
+            payload = self._build_payload(
+                self.tx_text.toPlainText(),
+                self.mode_combo.currentText() == "HEX",
+                self.escape_cb.isChecked(),
+                CHECKSUM_LABELS[self.checksum_combo.currentText()],
+                str(self.line_ending_combo.currentData()),
+            )
+        except ValueError:
+            self.send_stats_label.setText("编码错误")
+            return
+        self.send_stats_label.setText(f"{len(payload)} 字节")
+
+    def _update_checksum_hint(self, *_):
+        self.checksum_hint.setText(f"校验 {self.checksum_combo.currentText()}")
+
+    def _on_auto_send_period_changed(self, value: int):
+        if self._auto_send_timer.isActive():
+            self._auto_send_timer.start(int(value))
+
+    def _on_auto_send_toggled(self, checked: bool):
+        if checked:
+            if not self._port_open:
+                self.auto_send_cb.setChecked(False)
+                self.statusBar().showMessage("定时发送需要先打开串口")
+                return
+            self._auto_send_timer.start(self.auto_send_spin.value())
+            self.statusBar().showMessage(f"定时发送已开启：每 {self.auto_send_spin.value()} ms")
+            self._append_line("sys", f"定时发送已开启：每 {self.auto_send_spin.value()} ms")
+            return
+        self._auto_send_timer.stop()
+        self.statusBar().showMessage("定时发送已停止")
+        self._append_line("sys", "定时发送已停止")
+
+    def _auto_send_tick(self):
+        if not self._port_open:
+            self.auto_send_cb.setChecked(False)
+            return
+        self._send_once(remember=False)
+
+    def _save_receive_log(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存接收数据", "serial_log.txt", "文本文件 (*.txt);;所有文件 (*.*)"
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(self.rx_text.toPlainText(), encoding="utf-8")
+        except OSError as exc:
+            self._warn(f"保存失败：{exc}")
+            return
+        self.statusBar().showMessage(f"接收数据已保存：{path}")
+
+    def _toggle_always_on_top(self, checked: bool):
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, bool(checked))
+        self.show()
+
     # ---------- 其它 ----------
     def _warn(self, message: str):
         QMessageBox.warning(self, "提示", message)
@@ -940,10 +1060,17 @@ class MainWindow(QMainWindow):
         self.dtr_cb.setChecked(settings.value("dtr", "true") in (True, "true"))
         self.uniform_cb.setChecked(settings.value("uniform", "false") in (True, "true"))
         self.period_spin.setValue(int(settings.value("period_ms", 1000) or 1000))
+        self.auto_send_spin.setValue(int(settings.value("auto_send_ms", 1000) or 1000))
+        on_top = settings.value("on_top", "false") in (True, "true")
+        self.top_cb.setChecked(on_top)
+        if on_top:
+            self._toggle_always_on_top(True)
 
         self.quick_panel.set_slots(load_slots(settings.value("quick_slots")))
         self._refresh_quick_shortcuts()
         self._refresh_history_combo()
+        self._update_checksum_hint()
+        self._update_send_stats()
         self._apply_theme()
 
     def _save_settings(self):
@@ -961,12 +1088,15 @@ class MainWindow(QMainWindow):
         settings.setValue("dtr", self.dtr_cb.isChecked())
         settings.setValue("uniform", self.uniform_cb.isChecked())
         settings.setValue("period_ms", self.period_spin.value())
+        settings.setValue("auto_send_ms", self.auto_send_spin.value())
+        settings.setValue("on_top", self.top_cb.isChecked())
         settings.setValue("quick_slots", dump_slots(self.quick_panel.get_slots()))
         settings.setValue("history", dump_history(self._history))
 
     def closeEvent(self, event):
         try:
             self._file_timer.stop()
+            self._auto_send_timer.stop()
             self._flush_pending()
             self._controller.loop_stop_requested.emit()
             self._controller.close_requested.emit()

@@ -43,9 +43,9 @@ def windows(qapp, tmp_path):
 
 def _items():
     return [
-        MessageItem(content="AA 55", is_hex=True, interval_ms=200, note="心跳", enabled=True, checksum="crc16"),
+        MessageItem(content="AA 55", is_hex=True, interval_ms=200, note="心跳", enabled=True, checksum="none"),
         MessageItem(content=r"HELLO\n", is_hex=False, interval_ms=1000, note="文本", enabled=True, checksum="none"),
-        MessageItem(content="RESET", is_hex=False, interval_ms=3000, note="复位", enabled=False, checksum="lrc"),
+        MessageItem(content="RESET", is_hex=False, interval_ms=3000, note="复位", enabled=False, checksum="none"),
     ]
 
 
@@ -173,6 +173,83 @@ def test_uniform_period_loop_payloads(windows):
 
     # 禁用项不参与
     assert len(window._collect_loop_payloads()) == 2
+
+
+def test_send_stats_and_clear(windows):
+    window = windows()
+    window.tx_text.setPlainText("AB")
+    window._update_send_stats()
+    assert window.send_stats_label.text() == "2 字节"
+
+    window.mode_combo.setCurrentText("HEX")
+    window.tx_text.setPlainText("41 42")
+    window._update_send_stats()
+    assert window.send_stats_label.text() == "2 字节"
+
+    window.tx_text.setPlainText("ZZ")
+    window._update_send_stats()
+    assert window.send_stats_label.text() == "编码错误"
+
+    window.mode_combo.setCurrentText("文本")
+    window.tx_text.setPlainText("hello")
+    window._clear_send()
+    assert window.tx_text.toPlainText() == ""
+
+
+def test_auto_send_requires_open_port(windows):
+    window = windows()
+    window.auto_send_cb.setChecked(True)
+    assert window.auto_send_cb.isChecked() is False
+    assert window._auto_send_timer.isActive() is False
+
+
+def test_always_on_top_toggle(windows):
+    from PySide6.QtCore import Qt as QtCore
+
+    window = windows()
+    window.top_cb.setChecked(True)
+    assert bool(window.windowFlags() & QtCore.WindowStaysOnTopHint)
+    window.top_cb.setChecked(False)
+    assert not bool(window.windowFlags() & QtCore.WindowStaysOnTopHint)
+
+
+def test_row_delete_button(windows):
+    window = windows()
+    table = window.send_table
+    table.set_items(_items())
+    assert table.table.rowCount() == 3
+
+    delete_button = table.table.cellWidget(0, table.COL_DELETE)
+    delete_button.click()
+    assert table.table.rowCount() == 2
+    assert table.get_items()[0].content == "HELLO\\n"
+
+
+def test_global_checksum_applies_to_all_sending(windows):
+    from serial_assistant.core.checksum import append_checksum
+
+    window = windows()
+    window.send_table.set_items(_items())
+    window.checksum_combo.setCurrentText("CRC16")
+
+    payloads = window._collect_loop_payloads()
+    assert payloads[0]["payload"] == append_checksum(bytes.fromhex("AA55"), "crc16")
+    assert len(payloads[0]["payload"]) == 4
+
+    single = window._build_payload("AA 55", True, True, "crc16", "none")
+    assert single == payloads[0]["payload"]
+
+    window.checksum_combo.setCurrentText("无")
+    assert window._collect_loop_payloads()[0]["payload"] == bytes.fromhex("AA55")
+
+
+def test_timestamp_has_milliseconds(windows):
+    import re
+
+    window = windows()
+    assert re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{3}", window._timestamp())
+    window._append_line("rx", "AB")
+    assert re.search(r"\[\d{2}:\d{2}:\d{2}\.\d{3}\]", window.rx_text.toPlainText())
 
 
 def test_module_selftest_subprocess():

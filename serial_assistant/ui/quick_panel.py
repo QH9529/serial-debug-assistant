@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.quicksend import MAX_SLOTS, QuickSlot
-from .send_table import CHECKSUM_KEY_TO_LABEL, CHECKSUM_LABELS
 
 COLUMNS = 6
 
@@ -40,16 +39,12 @@ class QuickSlotDialog(QDialog):
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["文本", "HEX"])
         self.mode_combo.setCurrentIndex(1 if slot.is_hex else 0)
-        self.checksum_combo = QComboBox()
-        self.checksum_combo.addItems(list(CHECKSUM_LABELS.keys()))
-        self.checksum_combo.setCurrentText(CHECKSUM_KEY_TO_LABEL.get(slot.checksum, "无"))
         self.hotkey_edit = QLineEdit(slot.hotkey)
         self.hotkey_edit.setPlaceholderText("例如 F1 / Ctrl+1 / Alt+S，留空表示不绑定")
 
         form.addRow("名称", self.name_edit)
         form.addRow("内容", self.content_edit)
         form.addRow("模式", self.mode_combo)
-        form.addRow("校验", self.checksum_combo)
         form.addRow("快捷键", self.hotkey_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -62,7 +57,7 @@ class QuickSlotDialog(QDialog):
             label=self.name_edit.text().strip(),
             content=self.content_edit.text(),
             is_hex=self.mode_combo.currentIndex() == 1,
-            checksum=CHECKSUM_LABELS.get(self.checksum_combo.currentText(), "none"),
+            checksum="none",
             hotkey=self.hotkey_edit.text().strip(),
         )
 

@@ -1,12 +1,20 @@
-"""多条循环发送表格控件。"""
+"""多条循环发送表格控件。
+
+所有列都用真实输入控件（勾选框 / 输入框 / 下拉框 / 数字框），
+每行末尾带独立删除按钮；校验为全局设置，不在此表内。
+"""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHeaderView,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,85 +35,102 @@ CHECKSUM_TOOLTIPS = {
 }
 CHECKSUM_KEY_TO_LABEL = {v: k for k, v in CHECKSUM_LABELS.items()}
 
+MAX_INTERVAL_MS = 86400000
+
 
 class SendTableWidget(QWidget):
-    """循环发送条目表：启用 / 内容 / 模式 / 间隔 / 校验 / 备注。"""
+    """循环发送条目表：启用 / 内容 / 模式 / 间隔 / 备注 / 删除。"""
 
     COL_ENABLED = 0
     COL_CONTENT = 1
     COL_MODE = 2
     COL_INTERVAL = 3
-    COL_CHECKSUM = 4
-    COL_NOTE = 5
+    COL_NOTE = 4
+    COL_DELETE = 5
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.table = QTableWidget(0, 6, self)
-        self.table.setHorizontalHeaderLabels(["启用", "内容", "模式", "间隔(ms)", "校验", "备注"])
+        self.table.setHorizontalHeaderLabels(["启用", "内容", "模式", "间隔(ms)", "备注", ""])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(self.COL_CONTENT, QHeaderView.Stretch)
-        self.table.setColumnWidth(self.COL_ENABLED, 48)
-        self.table.setColumnWidth(self.COL_MODE, 72)
-        self.table.setColumnWidth(self.COL_INTERVAL, 84)
-        self.table.setColumnWidth(self.COL_CHECKSUM, 120)
-        self.table.setColumnWidth(self.COL_NOTE, 120)
+        self.table.setColumnWidth(self.COL_ENABLED, 46)
+        self.table.setColumnWidth(self.COL_MODE, 80)
+        self.table.setColumnWidth(self.COL_INTERVAL, 100)
+        self.table.setColumnWidth(self.COL_NOTE, 130)
+        self.table.setColumnWidth(self.COL_DELETE, 58)
         layout.addWidget(self.table)
 
-    # ---------- 行操作 ----------
+    # ---------- 行构建 ----------
     def add_row(self, item=None) -> int:
         item = item or MessageItem()
         row = self.table.rowCount()
         self.table.insertRow(row)
 
-        flag = QTableWidgetItem()
-        flag.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        flag.setCheckState(Qt.Checked if item.enabled else Qt.Unchecked)
-        self.table.setItem(row, self.COL_ENABLED, flag)
+        enabled = QCheckBox()
+        enabled.setChecked(bool(item.enabled))
+        enabled.setToolTip("是否参与循环发送")
+        wrap = QWidget()
+        wrap_layout = QHBoxLayout(wrap)
+        wrap_layout.setContentsMargins(0, 0, 0, 0)
+        wrap_layout.setAlignment(Qt.AlignCenter)
+        wrap_layout.addWidget(enabled)
+        self.table.setCellWidget(row, self.COL_ENABLED, wrap)
 
-        self.table.setItem(row, self.COL_CONTENT, QTableWidgetItem(item.content))
+        content = QLineEdit(item.content)
+        content.setPlaceholderText("发送内容，文本模式支持 \\n \\r \\t \\xhh 转义")
+        self.table.setCellWidget(row, self.COL_CONTENT, content)
 
-        mode_combo = QComboBox()
-        mode_combo.addItems(["文本", "HEX"])
-        mode_combo.setCurrentIndex(1 if item.is_hex else 0)
-        self.table.setCellWidget(row, self.COL_MODE, mode_combo)
+        mode = QComboBox()
+        mode.addItems(["文本", "HEX"])
+        mode.setCurrentIndex(1 if item.is_hex else 0)
+        self.table.setCellWidget(row, self.COL_MODE, mode)
 
-        self.table.setItem(row, self.COL_INTERVAL, QTableWidgetItem(str(item.interval_ms)))
+        interval = QSpinBox()
+        interval.setRange(1, MAX_INTERVAL_MS)
+        interval.setSingleStep(50)
+        interval.setValue(max(1, int(item.interval_ms)))
+        interval.setToolTip("这条指令发送后等待的间隔；勾选「统一周期」时以全局周期为准")
+        self.table.setCellWidget(row, self.COL_INTERVAL, interval)
 
-        sum_combo = QComboBox()
-        for label in CHECKSUM_LABELS:
-            sum_combo.addItem(label)
-            sum_combo.setItemData(
-                sum_combo.count() - 1, CHECKSUM_TOOLTIPS.get(label, ""), Qt.ToolTipRole
-            )
-        sum_combo.setCurrentText(CHECKSUM_KEY_TO_LABEL.get(item.checksum, "无"))
-        self.table.setCellWidget(row, self.COL_CHECKSUM, sum_combo)
+        note = QLineEdit(item.note)
+        note.setPlaceholderText("备注")
+        self.table.setCellWidget(row, self.COL_NOTE, note)
 
-        self.table.setItem(row, self.COL_NOTE, QTableWidgetItem(item.note))
+        delete = QPushButton("删除")
+        delete.setObjectName("rowDelete")
+        delete.setToolTip("删除这一条")
+        delete.clicked.connect(self._on_row_delete)
+        self.table.setCellWidget(row, self.COL_DELETE, delete)
         return row
 
+    def _on_row_delete(self):
+        button = self.sender()
+        for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, self.COL_DELETE) is button:
+                self.table.removeRow(row)
+                return
+
+    # ---------- 读写 ----------
     def get_items(self):
         items = []
         for row in range(self.table.rowCount()):
-            flag = self.table.item(row, self.COL_ENABLED)
-            content_item = self.table.item(row, self.COL_CONTENT)
-            interval_item = self.table.item(row, self.COL_INTERVAL)
-            note_item = self.table.item(row, self.COL_NOTE)
-            mode_combo = self.table.cellWidget(row, self.COL_MODE)
-            sum_combo = self.table.cellWidget(row, self.COL_CHECKSUM)
-            try:
-                interval = int((interval_item.text() if interval_item else "").strip() or "1000")
-            except ValueError:
-                interval = 1000
+            enabled_wrap = self.table.cellWidget(row, self.COL_ENABLED)
+            enabled_box = enabled_wrap.findChild(QCheckBox) if enabled_wrap else None
+            content = self.table.cellWidget(row, self.COL_CONTENT)
+            mode = self.table.cellWidget(row, self.COL_MODE)
+            interval = self.table.cellWidget(row, self.COL_INTERVAL)
+            note = self.table.cellWidget(row, self.COL_NOTE)
             items.append(
                 MessageItem(
-                    content=content_item.text() if content_item else "",
-                    is_hex=bool(mode_combo and mode_combo.currentIndex() == 1),
-                    interval_ms=max(interval, 1),
-                    note=note_item.text() if note_item else "",
-                    enabled=bool(flag and flag.checkState() == Qt.Checked),
-                    checksum=CHECKSUM_LABELS.get(sum_combo.currentText(), "none") if sum_combo else "none",
+                    content=content.text() if content else "",
+                    is_hex=bool(mode and mode.currentIndex() == 1),
+                    interval_ms=max(1, interval.value()) if interval else 1000,
+                    note=note.text() if note else "",
+                    enabled=bool(enabled_box and enabled_box.isChecked()),
+                    checksum="none",
                 )
             )
         return items
@@ -124,10 +149,11 @@ class SendTableWidget(QWidget):
             self.table.removeRow(row)
 
     def selected_row(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            return row
         rows = sorted({index.row() for index in self.table.selectedIndexes()})
-        if len(rows) == 1:
-            return rows[0]
-        return None
+        return rows[0] if len(rows) == 1 else None
 
     def move_current(self, delta: int):
         row = self.selected_row()
