@@ -15,9 +15,15 @@ from ..core.scheduler import MessageItem
 
 CHECKSUM_LABELS = {
     "无": "none",
-    "CRC16-Modbus": "crc16",
-    "SUM8 累加和": "sum8",
+    "CRC16": "crc16",
+    "SUM8": "sum8",
     "LRC": "lrc",
+}
+CHECKSUM_TOOLTIPS = {
+    "无": "不追加校验",
+    "CRC16": "CRC16-Modbus，低字节在前",
+    "SUM8": "8 位累加和",
+    "LRC": "各字节之和取反加一",
 }
 CHECKSUM_KEY_TO_LABEL = {v: k for k, v in CHECKSUM_LABELS.items()}
 
@@ -68,7 +74,11 @@ class SendTableWidget(QWidget):
         self.table.setItem(row, self.COL_INTERVAL, QTableWidgetItem(str(item.interval_ms)))
 
         sum_combo = QComboBox()
-        sum_combo.addItems(list(CHECKSUM_LABELS.keys()))
+        for label in CHECKSUM_LABELS:
+            sum_combo.addItem(label)
+            sum_combo.setItemData(
+                sum_combo.count() - 1, CHECKSUM_TOOLTIPS.get(label, ""), Qt.ToolTipRole
+            )
         sum_combo.setCurrentText(CHECKSUM_KEY_TO_LABEL.get(item.checksum, "无"))
         self.table.setCellWidget(row, self.COL_CHECKSUM, sum_combo)
 

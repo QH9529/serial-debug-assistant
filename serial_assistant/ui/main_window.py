@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QRadioButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -191,11 +190,13 @@ class MainWindow(QMainWindow):
         panel, layout = self._panel("接收日志")
         row = QHBoxLayout()
         row.setSpacing(10)
-        self.hex_display_cb = QCheckBox("HEX 显示")
+        self.hex_display_cb = QCheckBox("HEX")
+        self.hex_display_cb.setToolTip("接收日志以 HEX 形式显示")
         self.timestamp_cb = QCheckBox("时间戳")
         self.timestamp_cb.setChecked(True)
         self.pause_cb = QCheckBox("暂停滚动")
-        self.log_cb = QCheckBox("自动保存日志")
+        self.log_cb = QCheckBox("保存日志")
+        self.log_cb.setToolTip("接收数据自动写入 logs/ 目录")
         self.rx_label = QLabel("RX 0 B")
         self.rx_label.setObjectName("pill")
         self.tx_label = QLabel("TX 0 B")
@@ -261,12 +262,15 @@ class MainWindow(QMainWindow):
     def _build_loop_panel(self):
         panel, layout = self._panel("多条循环发送")
         row = QHBoxLayout()
-        row.setSpacing(8)
-        self.seq_radio = QRadioButton("顺序轮询")
-        self.seq_radio.setChecked(True)
-        self.seq_radio.setToolTip("按列表顺序逐条发送，每条发完等待它自己的间隔，到尾后回绕")
-        self.per_radio = QRadioButton("单条周期")
-        self.per_radio.setToolTip("每条启用项按自己的周期独立触发")
+        row.setSpacing(6)
+        self.mode_combo_loop = QComboBox()
+        self.mode_combo_loop.addItem("顺序轮询", MODE_SEQUENTIAL)
+        self.mode_combo_loop.addItem("单条周期", MODE_PER_ITEM)
+        self.mode_combo_loop.setFixedWidth(104)
+        self.mode_combo_loop.setToolTip(
+            "顺序轮询：按列表顺序逐条发送，每条发完等待它自己的间隔，到尾后回绕\n"
+            "单条周期：每条启用项按自己的周期独立触发"
+        )
 
         self.add_btn = QPushButton("添加")
         self.del_btn = QPushButton("删除")
@@ -276,24 +280,35 @@ class MainWindow(QMainWindow):
         for button in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
             button.setObjectName("ghost")
 
-        self.save_btn = QPushButton("保存方案")
-        self.load_btn = QPushButton("加载方案")
+        self.save_btn = QPushButton("保存")
+        self.save_btn.setToolTip("把当前条目与调度模式保存为 JSON 方案")
+        self.load_btn = QPushButton("加载")
+        self.load_btn.setToolTip("从 JSON 方案文件恢复条目与调度模式")
         self.save_btn.setObjectName("ghost")
         self.load_btn.setObjectName("ghost")
 
         self.loop_btn = QPushButton("开始循环")
         self.loop_btn.setObjectName("primary")
 
-        row.addWidget(self.seq_radio)
-        row.addWidget(self.per_radio)
-        row.addSpacing(10)
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        mode_tag = QLabel("调度")
+        mode_tag.setObjectName("hint")
+        row1.addWidget(mode_tag)
+        row1.addWidget(self.mode_combo_loop)
+        row1.addSpacing(6)
         for button in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
-            row.addWidget(button)
-        row.addStretch(1)
-        row.addWidget(self.save_btn)
-        row.addWidget(self.load_btn)
-        row.addWidget(self.loop_btn)
-        layout.addLayout(row)
+            row1.addWidget(button)
+        row1.addStretch(1)
+        layout.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        row2.addStretch(1)
+        row2.addWidget(self.save_btn)
+        row2.addWidget(self.load_btn)
+        row2.addWidget(self.loop_btn)
+        layout.addLayout(row2)
 
         self.send_table = SendTableWidget()
         table = self.send_table.table
@@ -517,7 +532,7 @@ class MainWindow(QMainWindow):
         if not payloads:
             self._warn("没有启用的发送条目")
             return
-        mode = MODE_SEQUENTIAL if self.seq_radio.isChecked() else MODE_PER_ITEM
+        mode = self.mode_combo_loop.currentData() or MODE_SEQUENTIAL
         self._controller.loop_requested.emit({"mode": mode, "payloads": payloads})
         self._set_loop_ui(True)
         mode_label = "顺序轮询" if mode == MODE_SEQUENTIAL else "单条周期"
@@ -538,7 +553,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        mode = MODE_SEQUENTIAL if self.seq_radio.isChecked() else MODE_PER_ITEM
+        mode = str(self.mode_combo_loop.currentData() or MODE_SEQUENTIAL)
         try:
             save_profile(path, mode, self.send_table.get_items())
             self.statusBar().showMessage(f"方案已保存：{path}")
@@ -555,10 +570,9 @@ class MainWindow(QMainWindow):
             self._warn(f"加载失败：{exc}")
             return
         self.send_table.set_items(items)
-        if mode == MODE_PER_ITEM:
-            self.per_radio.setChecked(True)
-        else:
-            self.seq_radio.setChecked(True)
+        index = self.mode_combo_loop.findData(mode)
+        if index >= 0:
+            self.mode_combo_loop.setCurrentIndex(index)
         self.statusBar().showMessage(f"方案已加载：{path}")
 
     # ---------- 其它 ----------
