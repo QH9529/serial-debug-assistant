@@ -36,8 +36,8 @@ from .send_table import CHECKSUM_LABELS, SendTableWidget
 
 BAUD_RATES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
 
-PARITY_MAP = {"无": "N", "偶校验": "E", "奇校验": "O"}
-FLOW_MAP = {"无": None, "硬件 RTS/CTS": "rtscts", "软件 XON/XOFF": "xonxoff"}
+PARITY_MAP = {"无校验": "N", "偶校验": "E", "奇校验": "O"}
+FLOW_MAP = {"无流控": None, "RTS/CTS": "rtscts", "XON/XOFF": "xonxoff"}
 
 LOG_DIR = "logs"
 KIND_LABELS = {"rx": "RX", "tx": "TX", "sys": "SYS"}
@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         if app is not None:
             self._theme = theme_mod.apply_theme(app, self._theme_name)
         if hasattr(self, "theme_btn"):
-            self.theme_btn.setText(f"{self._theme['label']}主题")
+            self.theme_btn.setText(self._theme["label"])
 
     # ---------- UI ----------
     def _build_ui(self):
@@ -135,13 +135,21 @@ class MainWindow(QMainWindow):
         self.baud_combo.setMinimumWidth(96)
 
         self.databits_combo = QComboBox()
-        self.databits_combo.addItems(["8", "7"])
+        self.databits_combo.addItems(["8 位", "7 位"])
+        self.databits_combo.setToolTip("数据位")
+        self.databits_combo.setFixedWidth(64)
         self.stopbits_combo = QComboBox()
-        self.stopbits_combo.addItems(["1", "2"])
+        self.stopbits_combo.addItems(["1 位", "2 位"])
+        self.stopbits_combo.setToolTip("停止位")
+        self.stopbits_combo.setFixedWidth(64)
         self.parity_combo = QComboBox()
         self.parity_combo.addItems(list(PARITY_MAP.keys()))
+        self.parity_combo.setToolTip("校验位")
+        self.parity_combo.setFixedWidth(88)
         self.flow_combo = QComboBox()
         self.flow_combo.addItems(list(FLOW_MAP.keys()))
+        self.flow_combo.setToolTip("流控")
+        self.flow_combo.setFixedWidth(100)
         self.reconnect_cb = QCheckBox("断线自动重连")
 
         self.open_btn = QPushButton("打开串口")
@@ -152,25 +160,24 @@ class MainWindow(QMainWindow):
         self.conn_label = QLabel("未连接")
         self.conn_label.setObjectName("pill")
 
-        self.theme_btn = QPushButton(f"{self._theme['label']}主题")
+        self.theme_btn = QPushButton(self._theme["label"])
         self.theme_btn.setObjectName("ghost")
+        self.theme_btn.setToolTip("切换深色 / 浅色主题")
         self.theme_btn.clicked.connect(self._toggle_theme)
 
-        for label, widget in (
-            ("端口", self.port_combo),
-            (None, self.refresh_btn),
-            ("波特率", self.baud_combo),
-            ("数据位", self.databits_combo),
-            ("停止位", self.stopbits_combo),
-            ("校验", self.parity_combo),
-            ("流控", self.flow_combo),
-        ):
-            if label:
-                tag = QLabel(label)
-                tag.setObjectName("hint")
-                row.addWidget(tag)
-            row.addWidget(widget)
-
+        port_tag = QLabel("端口")
+        port_tag.setObjectName("hint")
+        baud_tag = QLabel("波特率")
+        baud_tag.setObjectName("hint")
+        row.addWidget(port_tag)
+        row.addWidget(self.port_combo)
+        row.addWidget(self.refresh_btn)
+        row.addWidget(baud_tag)
+        row.addWidget(self.baud_combo)
+        row.addWidget(self.databits_combo)
+        row.addWidget(self.stopbits_combo)
+        row.addWidget(self.parity_combo)
+        row.addWidget(self.flow_combo)
         row.addWidget(self.reconnect_cb)
         row.addStretch(1)
         row.addWidget(self.dot)
@@ -358,8 +365,8 @@ class MainWindow(QMainWindow):
         config = {
             "port": port,
             "baudrate": baudrate,
-            "bytesize": int(self.databits_combo.currentText()),
-            "stopbits": float(self.stopbits_combo.currentText()),
+            "bytesize": int(self.databits_combo.currentText().split()[0]),
+            "stopbits": float(self.stopbits_combo.currentText().split()[0]),
             "parity": PARITY_MAP[self.parity_combo.currentText()],
             "flow": FLOW_MAP[self.flow_combo.currentText()],
             "auto_reconnect": self.reconnect_cb.isChecked(),
