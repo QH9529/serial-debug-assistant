@@ -143,26 +143,22 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self._build_connection_bar())
 
-        # 上下分区：上 = 接收日志；下 = 发送区（左：单次发送 + 快捷发送；右：多条循环发送）
-        splitter = QSplitter(Qt.Vertical)
+        # 左右分区：左 = 接收日志；右 = 发送区（上：快捷发送 / 中：单次发送 / 下：多条循环发送）
+        splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._build_log_panel())
 
-        send_row = QSplitter(Qt.Horizontal)
-        send_left = QSplitter(Qt.Vertical)
-        send_left.addWidget(self._build_send_panel())
-        send_left.addWidget(self._build_quick_panel())
-        send_left.setStretchFactor(0, 1)
-        send_left.setStretchFactor(1, 0)
-        send_row.addWidget(send_left)
-        send_row.addWidget(self._build_loop_panel())
-        send_row.setStretchFactor(0, 1)
-        send_row.setStretchFactor(1, 1)
-        send_row.setSizes([560, 660])
-        splitter.addWidget(send_row)
+        right = QSplitter(Qt.Vertical)
+        right.addWidget(self._build_quick_panel())
+        right.addWidget(self._build_send_panel())
+        right.addWidget(self._build_loop_panel())
+        right.setStretchFactor(0, 0)
+        right.setStretchFactor(1, 0)
+        right.setStretchFactor(2, 1)
+        splitter.addWidget(right)
 
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
-        splitter.setSizes([420, 300])
+        splitter.setSizes([640, 560])
         layout.addWidget(splitter, 1)
 
         status = self.statusBar()
