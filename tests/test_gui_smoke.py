@@ -301,6 +301,26 @@ def test_interval_cell_and_header_centered(windows):
     assert table.table.cellWidget(0, table.COL_DELETE).height() == 24
 
 
+def test_quick_panel_empty_hint_not_duplicated(windows):
+    """空状态提示只能出现一次（曾经因为重建未解除父子关系而叠两层）。"""
+
+    def hint_count():
+        return len(
+            [
+                label
+                for label in window.quick_panel.findChildren(type(window.quick_panel.hint))
+                if label.text().startswith("还没有快捷指令")
+            ]
+        )
+
+    window = windows()
+    assert hint_count() == 1
+    window.quick_panel.set_slots([QuickSlot(content="A")])
+    assert hint_count() == 0
+    window.quick_panel.set_slots([])
+    assert hint_count() == 1
+
+
 def test_module_selftest_subprocess():
     result = subprocess.run(
         [sys.executable, "-m", "serial_assistant", "--selftest"],

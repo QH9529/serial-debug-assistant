@@ -102,7 +102,7 @@ FILE_INTERVAL_MS = 10
 class MainWindow(QMainWindow):
     def __init__(self, parent=None, settings=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} {APP_VERSION_LABEL}")
+        self.setWindowTitle(APP_NAME)
         self.resize(1240, 800)
 
         icon = resources.app_icon()

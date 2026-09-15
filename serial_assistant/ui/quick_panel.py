@@ -123,6 +123,7 @@ class QuickSendPanel(QWidget):
             item = self.grid.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.setParent(None)  # 立即脱离父级，避免残留控件叠在界面上
                 widget.deleteLater()
 
         if not self._slots:
