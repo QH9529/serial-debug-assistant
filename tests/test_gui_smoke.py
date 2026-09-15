@@ -43,7 +43,7 @@ def windows(qapp, tmp_path):
 
 def _items():
     return [
-        MessageItem(content="AA 55", is_hex=True, interval_ms=200, note="心跳", enabled=True, checksum="none"),
+        MessageItem(content="AA 55", is_hex=False, interval_ms=200, note="心跳", enabled=True, checksum="none"),
         MessageItem(content=r"HELLO\n", is_hex=False, interval_ms=1000, note="文本", enabled=True, checksum="none"),
         MessageItem(content="RESET", is_hex=False, interval_ms=3000, note="复位", enabled=False, checksum="none"),
     ]
@@ -229,7 +229,13 @@ def test_global_checksum_applies_to_all_sending(windows):
     from serial_assistant.core.checksum import append_checksum
 
     window = windows()
-    window.send_table.set_items(_items())
+    window.send_table.set_items(
+        [
+            MessageItem(content="AA 55", interval_ms=200, enabled=True),
+            MessageItem(content="DE AD", interval_ms=500, enabled=False),
+        ]
+    )
+    window.mode_combo.setCurrentText("HEX")
     window.checksum_combo.setCurrentText("CRC16")
 
     payloads = window._collect_loop_payloads()
@@ -250,6 +256,20 @@ def test_timestamp_has_milliseconds(windows):
     assert re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{3}", window._timestamp())
     window._append_line("rx", "AB")
     assert re.search(r"\[\d{2}:\d{2}:\d{2}\.\d{3}\]", window.rx_text.toPlainText())
+
+
+def test_loop_echoes_sent_frames(windows):
+    window = windows()
+    window.echo_cb.setChecked(True)
+    window._on_loop_sent(1, bytes.fromhex("A55A0102"))
+    text = window.rx_text.toPlainText()
+    assert "A5 5A 01 02" in text
+    assert "TX" in text
+
+    window.rx_text.clear()
+    window.echo_cb.setChecked(False)
+    window._on_loop_sent(0, bytes.fromhex("A55A"))
+    assert "A5 5A" not in window.rx_text.toPlainText()
 
 
 def test_module_selftest_subprocess():

@@ -188,12 +188,14 @@ QPushButton#primary:disabled {{ background-color: {surface_alt}; color: {muted};
 QPushButton#ghost {{ background-color: transparent; padding: 5px 9px; }}
 QPushButton#ghost:hover {{ border-color: {accent}; }}
 QPushButton#rowDelete {{
-    background-color: transparent;
-    border: 1px solid transparent;
-    color: {muted};
-    padding: 2px 6px;
+    background-color: {surface_alt};
+    border: 1px solid {border_strong};
+    border-radius: 6px;
+    color: {fg};
+    padding: 3px 10px;
 }}
 QPushButton#rowDelete:hover {{ color: {danger}; border-color: {danger}; }}
+QPushButton#rowDelete:pressed {{ background-color: {border}; }}
 
 QComboBox, QLineEdit, QSpinBox {{
     background-color: {surface_sunken};

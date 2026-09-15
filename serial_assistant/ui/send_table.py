@@ -1,14 +1,13 @@
 """多条循环发送表格控件。
 
-所有列都用真实输入控件（勾选框 / 输入框 / 下拉框 / 数字框），
-每行末尾带独立删除按钮；校验为全局设置，不在此表内。
+每行都是真实输入控件（勾选框 / 输入框 / 数字框），行尾带删除按钮。
+模式与校验为全局设置（与单次发送共用），不在此表内。
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QHeaderView,
     QHBoxLayout,
     QLineEdit,
@@ -21,6 +20,9 @@ from PySide6.QtWidgets import (
 
 from ..core.scheduler import MessageItem
 
+MAX_INTERVAL_MS = 86400000
+
+# 校验标签（发送区的全局校验下拉使用）
 CHECKSUM_LABELS = {
     "无": "none",
     "CRC16": "crc16",
@@ -35,32 +37,28 @@ CHECKSUM_TOOLTIPS = {
 }
 CHECKSUM_KEY_TO_LABEL = {v: k for k, v in CHECKSUM_LABELS.items()}
 
-MAX_INTERVAL_MS = 86400000
-
 
 class SendTableWidget(QWidget):
-    """循环发送条目表：启用 / 内容 / 模式 / 间隔 / 备注 / 删除。"""
+    """循环发送条目表：启用 / 内容 / 间隔 / 备注 / 删除。"""
 
     COL_ENABLED = 0
     COL_CONTENT = 1
-    COL_MODE = 2
-    COL_INTERVAL = 3
-    COL_NOTE = 4
-    COL_DELETE = 5
+    COL_INTERVAL = 2
+    COL_NOTE = 3
+    COL_DELETE = 4
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.table = QTableWidget(0, 6, self)
-        self.table.setHorizontalHeaderLabels(["启用", "内容", "模式", "间隔(ms)", "备注", ""])
+        self.table = QTableWidget(0, 5, self)
+        self.table.setHorizontalHeaderLabels(["启用", "内容（模式与校验见发送区）", "间隔(ms)", "备注", ""])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(self.COL_CONTENT, QHeaderView.Stretch)
         self.table.setColumnWidth(self.COL_ENABLED, 46)
-        self.table.setColumnWidth(self.COL_MODE, 80)
-        self.table.setColumnWidth(self.COL_INTERVAL, 100)
+        self.table.setColumnWidth(self.COL_INTERVAL, 104)
         self.table.setColumnWidth(self.COL_NOTE, 130)
-        self.table.setColumnWidth(self.COL_DELETE, 58)
+        self.table.setColumnWidth(self.COL_DELETE, 60)
         layout.addWidget(self.table)
 
     # ---------- 行构建 ----------
@@ -82,11 +80,6 @@ class SendTableWidget(QWidget):
         content = QLineEdit(item.content)
         content.setPlaceholderText("发送内容，文本模式支持 \\n \\r \\t \\xhh 转义")
         self.table.setCellWidget(row, self.COL_CONTENT, content)
-
-        mode = QComboBox()
-        mode.addItems(["文本", "HEX"])
-        mode.setCurrentIndex(1 if item.is_hex else 0)
-        self.table.setCellWidget(row, self.COL_MODE, mode)
 
         interval = QSpinBox()
         interval.setRange(1, MAX_INTERVAL_MS)
@@ -120,13 +113,12 @@ class SendTableWidget(QWidget):
             enabled_wrap = self.table.cellWidget(row, self.COL_ENABLED)
             enabled_box = enabled_wrap.findChild(QCheckBox) if enabled_wrap else None
             content = self.table.cellWidget(row, self.COL_CONTENT)
-            mode = self.table.cellWidget(row, self.COL_MODE)
             interval = self.table.cellWidget(row, self.COL_INTERVAL)
             note = self.table.cellWidget(row, self.COL_NOTE)
             items.append(
                 MessageItem(
                     content=content.text() if content else "",
-                    is_hex=bool(mode and mode.currentIndex() == 1),
+                    is_hex=False,
                     interval_ms=max(1, interval.value()) if interval else 1000,
                     note=note.text() if note else "",
                     enabled=bool(enabled_box and enabled_box.isChecked()),

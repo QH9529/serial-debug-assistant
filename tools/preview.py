@@ -11,6 +11,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from serial_assistant.core.quicksend import QuickSlot  # noqa: E402
@@ -76,7 +77,8 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     app = QApplication([])
-    window = MainWindow()
+    settings = QSettings(str(out_dir / "preview.ini"), QSettings.IniFormat)
+    window = MainWindow(settings=settings)
     window.send_table.set_items(DEMO_ITEMS)
     window.quick_panel.set_slots(DEMO_QUICK)
     window.tx_text.setPlainText("01 03 00 00 00 0A")

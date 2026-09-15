@@ -23,7 +23,7 @@ class SerialWorker(QObject):
     port_opened = Signal(str)
     port_closed = Signal()
     port_lost = Signal(str)
-    loop_sent = Signal(int)
+    loop_sent = Signal(int, object)
 
     READ_INTERVAL_MS = 20
     LOOP_TICK_MS = 5
@@ -201,7 +201,7 @@ class SerialWorker(QObject):
             if payload:
                 self.send_bytes(payload)
                 if 0 <= k < len(self._row_map):
-                    self.loop_sent.emit(self._row_map[k])
+                    self.loop_sent.emit(self._row_map[k], payload)
 
 
 class SerialWorkerController(QObject):

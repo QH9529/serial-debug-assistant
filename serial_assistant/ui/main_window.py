@@ -88,6 +88,7 @@ def hotkey_sequence(text: str):
     return None if sequence.isEmpty() else sequence
 
 LOG_DIR = "logs"
+MAX_LOG_BLOCKS = 20000  # 日志视图保留的最大行数，超出后丢弃最旧行（内存恒定）
 KIND_LABELS = {"rx": "RX", "tx": "TX", "sys": "SYS"}
 FILE_CHUNK = 1024
 FILE_INTERVAL_MS = 10
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
         self._history = history_from_raw(self._settings.value("history"))
         self._quick_shortcuts = []
         self._file_state = None
+        self.log_dir = str(self._settings.value("log_dir", "") or "")
 
         self._controller = SerialWorkerController()
         self._worker = self._controller.worker
@@ -210,7 +212,8 @@ class MainWindow(QMainWindow):
         self.flow_combo.setFixedWidth(138)
 
         self.reconnect_cb = QCheckBox("自动重连")
-        self.reconnect_cb.setToolTip("串口断开后自动尝试重连")
+        self.reconnect_cb.setChecked(True)
+        self.reconnect_cb.setToolTip("串口断开后自动尝试重连（默认开启）")
         self.rts_cb = QCheckBox("RTS")
         self.rts_cb.setChecked(True)
         self.rts_cb.setToolTip("手动控制 RTS 电平，可用于复位 MCU / 切换模块模式")
@@ -275,9 +278,12 @@ class MainWindow(QMainWindow):
         self.timestamp_cb.setChecked(True)
         self.pause_cb = QCheckBox("暂停滚动")
         self.log_cb = QCheckBox("保存日志")
-        self.log_cb.setToolTip("接收数据自动写入 logs/ 目录")
+        self.log_cb.setToolTip("接收数据自动写入日志文件（目录可选）")
+        self.echo_cb = QCheckBox("发送回显")
+        self.echo_cb.setChecked(True)
+        self.echo_cb.setToolTip("把发出的数据也显示在接收日志里（单次 / 快捷 / 循环发送都生效）")
 
-        for widget in (display_tag, self.display_combo, self.timestamp_cb, self.pause_cb, self.log_cb):
+        for widget in (display_tag, self.display_combo, self.timestamp_cb, self.pause_cb, self.log_cb, self.echo_cb):
             row1.addWidget(widget)
         row1.addStretch(1)
         layout.addLayout(row1)
@@ -316,14 +322,18 @@ class MainWindow(QMainWindow):
         self.save_log_btn = QPushButton("保存数据")
         self.save_log_btn.setObjectName("ghost")
         self.save_log_btn.setToolTip("把接收区当前内容另存为文本文件")
+        self.log_dir_btn = QPushButton("日志目录")
+        self.log_dir_btn.setObjectName("ghost")
+        self.log_dir_btn.setToolTip("选择自动日志的保存目录；日志为 txt 格式，按天命名")
         row2.addWidget(self.save_log_btn)
+        row2.addWidget(self.log_dir_btn)
         row2.addWidget(clear_btn)
         layout.addLayout(row2)
 
         self.rx_text = QPlainTextEdit()
         self.rx_text.setObjectName("log")
         self.rx_text.setReadOnly(True)
-        self.rx_text.document().setMaximumBlockCount(20000)
+        self.rx_text.document().setMaximumBlockCount(MAX_LOG_BLOCKS)
         layout.addWidget(self.rx_text, 1)
 
         self._wrap_timer = QTimer(self)
@@ -369,8 +379,10 @@ class MainWindow(QMainWindow):
         self.checksum_combo = QComboBox()
         self.checksum_combo.addItems(list(CHECKSUM_LABELS.keys()))
         self.checksum_combo.setToolTip("发送前追加校验")
-        self.send_btn = QPushButton("发送")
-        self.send_btn.setObjectName("ghost")
+        self.send_btn = QPushButton("发 送")
+        self.send_btn.setObjectName("primary")
+        self.send_btn.setMinimumWidth(92)
+        self.send_btn.setToolTip("发送输入框内容（Ctrl+Enter）")
         self.send_file_btn = QPushButton("文件")
         self.send_file_btn.setObjectName("ghost")
         self.send_file_btn.setToolTip("发送文件：按 %d 字节 / %d ms 分块下发（进度见状态栏）" % (FILE_CHUNK, FILE_INTERVAL_MS))
@@ -385,7 +397,6 @@ class MainWindow(QMainWindow):
         self.clear_send_btn = QPushButton("清空")
         self.clear_send_btn.setObjectName("ghost")
         self.clear_send_btn.setToolTip("清空发送框")
-        row.addWidget(self.clear_send_btn)
         row.addWidget(self.send_btn)
         row.addWidget(self.send_file_btn)
         layout.addLayout(row)
@@ -404,6 +415,7 @@ class MainWindow(QMainWindow):
         self.send_stats_label.setToolTip("本期发送将实际发出的字节数（含换行与校验）")
         row2.addWidget(self.auto_send_cb)
         row2.addWidget(self.auto_send_spin)
+        row2.addWidget(self.clear_send_btn)
         row2.addStretch(1)
         row2.addWidget(self.send_stats_label)
         layout.addLayout(row2)
@@ -436,11 +448,10 @@ class MainWindow(QMainWindow):
         )
 
         self.add_btn = QPushButton("添加")
-        self.del_btn = QPushButton("删除")
         self.up_btn = QPushButton("上移")
         self.down_btn = QPushButton("下移")
         self.clear_btn = QPushButton("清空")
-        for button in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
+        for button in (self.add_btn, self.up_btn, self.down_btn, self.clear_btn):
             button.setObjectName("ghost")
 
         self.save_btn = QPushButton("保存")
@@ -462,13 +473,16 @@ class MainWindow(QMainWindow):
         self.period_spin.setSingleStep(50)
         self.period_spin.setValue(1000)
         self.period_spin.setToolTip("统一周期，单位毫秒")
-        self.checksum_hint = QLabel("校验共用")
+        self.checksum_hint = QLabel("模式·校验共用")
         self.checksum_hint.setObjectName("hint")
-        self.checksum_hint.setToolTip("循环发送与单次发送、快捷发送共用同一个校验设置（在「单次发送」面板选择）")
+        self.checksum_hint.setToolTip(
+            "循环发送与单次发送共用同一份模式（文本/HEX）与校验设置，\n"
+            "在「单次发送」面板选择"
+        )
         row1.addWidget(self.uniform_cb)
         row1.addWidget(self.period_spin)
         row1.addSpacing(6)
-        for button in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
+        for button in (self.add_btn, self.up_btn, self.down_btn, self.clear_btn):
             row1.addWidget(button)
         row1.addStretch(1)
         layout.addLayout(row1)
@@ -504,6 +518,7 @@ class MainWindow(QMainWindow):
         self.send_file_btn.clicked.connect(self._toggle_send_file)
         self.clear_send_btn.clicked.connect(self._clear_send)
         self.save_log_btn.clicked.connect(self._save_receive_log)
+        self.log_dir_btn.clicked.connect(self._choose_log_dir)
         self.top_cb.toggled.connect(self._toggle_always_on_top)
         self.auto_send_cb.toggled.connect(self._on_auto_send_toggled)
         self.auto_send_spin.valueChanged.connect(self._on_auto_send_period_changed)
@@ -512,6 +527,7 @@ class MainWindow(QMainWindow):
         self.line_ending_combo.currentIndexChanged.connect(self._update_send_stats)
         self.checksum_combo.currentIndexChanged.connect(self._update_send_stats)
         self.checksum_combo.currentIndexChanged.connect(self._update_checksum_hint)
+        self.mode_combo.currentIndexChanged.connect(self._update_checksum_hint)
         self.escape_cb.toggled.connect(self._update_send_stats)
         self.history_combo.activated.connect(self._on_history_selected)
         self.rts_cb.toggled.connect(self._on_control_toggled)
@@ -519,7 +535,6 @@ class MainWindow(QMainWindow):
         self.display_combo.currentIndexChanged.connect(self._on_display_changed)
 
         self.add_btn.clicked.connect(lambda: self.send_table.add_row())
-        self.del_btn.clicked.connect(self.send_table.remove_selected)
         self.up_btn.clicked.connect(lambda: self.send_table.move_current(-1))
         self.down_btn.clicked.connect(lambda: self.send_table.move_current(1))
         self.clear_btn.clicked.connect(self.send_table.clear_rows)
@@ -705,6 +720,11 @@ class MainWindow(QMainWindow):
             f'<span style="color:{color}">{body}</span>'
         )
 
+    def _echo_tx(self, payload: bytes):
+        """按「发送回显」开关把发出的数据写进接收日志。"""
+        if self.echo_cb.isChecked():
+            self._append_line("tx", bytes_to_hex(payload))
+
     def _render_line(self, kind: str, data: bytes):
         mode = self.display_combo.currentData() or "text"
         encoding = self.encoding_combo.currentData() or "utf-8"
@@ -746,8 +766,9 @@ class MainWindow(QMainWindow):
         day = time.strftime("%Y-%m-%d")
         try:
             if self._log_path is None or self._log_day != day:
-                Path(LOG_DIR).mkdir(exist_ok=True)
-                self._log_path = Path(LOG_DIR) / f"serial_{day}.log"
+                base = Path(self.log_dir) if self.log_dir else Path(LOG_DIR)
+                base.mkdir(parents=True, exist_ok=True)
+                self._log_path = base / f"serial_{day}.txt"
                 self._log_day = day
             with open(self._log_path, "a", encoding="utf-8") as handle:
                 handle.write(f"[{self._timestamp()}] {tag} {text}\n")
@@ -768,7 +789,7 @@ class MainWindow(QMainWindow):
             return False
         self._controller.send_requested.emit(payload)
         if echo:
-            self._append_line("tx", bytes_to_hex(payload))
+            self._echo_tx(payload)
         return True
 
     def _send_once(self, *_args, remember: bool = True):
@@ -871,7 +892,9 @@ class MainWindow(QMainWindow):
             if not item.enabled or not item.content.strip():
                 continue
             try:
-                raw = encode_payload(item.content, item.is_hex, True)
+                raw = encode_payload(
+                    item.content, self.mode_combo.currentText() == "HEX", True
+                )
             except ValueError as exc:
                 raise ValueError(f"第 {row + 1} 条编码错误：{exc}") from exc
             payloads.append(
@@ -897,7 +920,7 @@ class MainWindow(QMainWindow):
             return
         for entry in payloads:
             self._controller.send_requested.emit(entry["payload"])
-            self._append_line("tx", bytes_to_hex(entry["payload"]))
+            self._echo_tx(entry["payload"])
         self.statusBar().showMessage(f"已按顺序发送 {len(payloads)} 条勾选指令")
 
     def _toggle_loop(self):
@@ -933,8 +956,10 @@ class MainWindow(QMainWindow):
         self._loop_active = active
         self.loop_btn.setText("停止循环" if active else "开始循环")
 
-    def _on_loop_sent(self, row: int):
+    def _on_loop_sent(self, row: int, payload=None):
         self.statusBar().showMessage(f"循环发送中：第 {row + 1} 条")
+        if payload:
+            self._echo_tx(bytes(payload))
 
     # ---------- 方案 ----------
     def _save_scheme(self):
@@ -985,7 +1010,9 @@ class MainWindow(QMainWindow):
         self.send_stats_label.setText(f"{len(payload)} 字节")
 
     def _update_checksum_hint(self, *_):
-        self.checksum_hint.setText(f"校验 {self.checksum_combo.currentText()}")
+        self.checksum_hint.setText(
+            f"模式 {self.mode_combo.currentText()}　校验 {self.checksum_combo.currentText()}"
+        )
 
     def _on_auto_send_period_changed(self, value: int):
         if self._auto_send_timer.isActive():
@@ -1010,6 +1037,22 @@ class MainWindow(QMainWindow):
             self.auto_send_cb.setChecked(False)
             return
         self._send_once(remember=False)
+
+    def _choose_log_dir(self):
+        current = self.log_dir or str(Path(LOG_DIR).resolve())
+        folder = QFileDialog.getExistingDirectory(self, "选择日志保存目录", current)
+        if not folder:
+            return
+        self.log_dir = folder
+        self._log_path = None
+        self._log_dir_btn_tooltip()
+        self._settings.setValue("log_dir", folder)
+        self.statusBar().showMessage(f"日志目录已设为：{folder}")
+        self._append_line("sys", f"日志目录已设为：{folder}")
+
+    def _log_dir_btn_tooltip(self):
+        shown = self.log_dir or str(Path(LOG_DIR).resolve())
+        self.log_dir_btn.setToolTip(f"当前日志目录：{shown}\n点击可更换；日志为 txt，按天命名")
 
     def _save_receive_log(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -1061,6 +1104,9 @@ class MainWindow(QMainWindow):
         self.uniform_cb.setChecked(settings.value("uniform", "false") in (True, "true"))
         self.period_spin.setValue(int(settings.value("period_ms", 1000) or 1000))
         self.auto_send_spin.setValue(int(settings.value("auto_send_ms", 1000) or 1000))
+        self.log_dir = str(settings.value("log_dir", "") or "")
+        self._log_dir_btn_tooltip()
+        self.reconnect_cb.setChecked(settings.value("reconnect", "true") in (True, "true"))
         on_top = settings.value("on_top", "false") in (True, "true")
         self.top_cb.setChecked(on_top)
         if on_top:
@@ -1090,6 +1136,8 @@ class MainWindow(QMainWindow):
         settings.setValue("period_ms", self.period_spin.value())
         settings.setValue("auto_send_ms", self.auto_send_spin.value())
         settings.setValue("on_top", self.top_cb.isChecked())
+        settings.setValue("reconnect", self.reconnect_cb.isChecked())
+        settings.setValue("log_dir", self.log_dir)
         settings.setValue("quick_slots", dump_slots(self.quick_panel.get_slots()))
         settings.setValue("history", dump_history(self._history))
 
