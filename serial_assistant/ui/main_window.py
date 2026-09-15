@@ -102,7 +102,7 @@ FILE_INTERVAL_MS = 10
 class MainWindow(QMainWindow):
     def __init__(self, parent=None, settings=None):
         super().__init__(parent)
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(f"{APP_NAME}-{APP_VERSION_LABEL}")
         self.resize(1240, 800)
 
         icon = resources.app_icon()
@@ -150,7 +150,6 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 14, 14, 10)
         layout.setSpacing(12)
 
-        layout.addLayout(self._build_header())
         layout.addWidget(self._build_connection_bar())
 
         # 左右分区：左 = 接收日志；右 = 发送区（上：快捷发送 / 中：单次发送 / 下：多条循环发送）
@@ -188,30 +187,6 @@ class MainWindow(QMainWindow):
             label.setObjectName("panelTitle")
             layout.addWidget(label)
         return frame, layout
-
-    def _build_header(self):
-        """左上角品牌区：应用图标 + 名称 + 版本号。"""
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.setContentsMargins(2, 0, 0, 0)
-
-        self.icon_label = QLabel()
-        self.icon_label.setObjectName("appIcon")
-        icon = resources.app_icon()
-        if not icon.isNull():
-            self.icon_label.setPixmap(icon.pixmap(24, 24))
-            self.icon_label.setFixedSize(24, 24)
-        self.app_name_label = QLabel(APP_NAME)
-        self.app_name_label.setObjectName("appName")
-        self.version_label = QLabel(APP_VERSION_LABEL)
-        self.version_label.setObjectName("pill")
-        self.version_label.setToolTip(f"当前版本 {APP_VERSION_LABEL}")
-
-        row.addWidget(self.icon_label)
-        row.addWidget(self.app_name_label)
-        row.addWidget(self.version_label)
-        row.addStretch(1)
-        return row
 
     def _build_connection_bar(self):
         panel, layout = self._panel("串口连接")

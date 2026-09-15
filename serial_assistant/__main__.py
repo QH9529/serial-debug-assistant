@@ -16,7 +16,7 @@ def main(argv=None) -> int:
     app = QApplication(argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
-    app.setApplicationDisplayName(f"{APP_NAME} {APP_VERSION_LABEL}")
+    app.setApplicationDisplayName(f"{APP_NAME}-{APP_VERSION_LABEL}")
     icon = resources.app_icon()
     if not icon.isNull():
         app.setWindowIcon(icon)

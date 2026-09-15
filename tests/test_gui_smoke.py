@@ -272,15 +272,26 @@ def test_loop_echoes_sent_frames(windows):
     assert "A5 5A" not in window.rx_text.toPlainText()
 
 
-def test_app_header_icon_and_version(windows):
+def test_app_title_icon_and_version(windows):
+    from PySide6.QtWidgets import QLabel
+
     from serial_assistant import __version__, resources
     from serial_assistant.ui.main_window import APP_VERSION_LABEL
 
     window = windows()
     assert APP_VERSION_LABEL == f"V{__version__}"
-    assert window.version_label.text() == APP_VERSION_LABEL
-    assert window.app_name_label.text() == "串口调试助手"
-    assert "串口调试助手" in window.windowTitle()
+
+    # 版本号只出现在标题栏（软件左上角）
+    title = window.windowTitle()
+    assert "串口调试助手" in title
+    assert APP_VERSION_LABEL in title
+    assert title == f"串口调试助手-{APP_VERSION_LABEL}"
+
+    # 界面内不再重复显示应用名/版本
+    texts = [label.text() for label in window.findChildren(QLabel)]
+    assert "串口调试助手" not in texts
+    assert APP_VERSION_LABEL not in texts
+
     assert not window.windowIcon().isNull()
     assert resources.asset_path("app.ico") is not None
     assert resources.asset_path("app.png") is not None
