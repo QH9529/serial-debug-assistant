@@ -52,15 +52,23 @@ python -m pytest
 
 覆盖内容：转义解析、HEX / 文本转换、CRC16-Modbus 标准校验值、SUM8、LRC、两种循环调度逻辑、方案 JSON 往返、offscreen GUI 冒烟。
 
-## 打包
+## 打包（单文件免依赖 exe）
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm --windowed --name SerialDebugAssistant ^
+pyinstaller --noconfirm --clean --onefile --windowed ^
+  --name SerialDebugAssistant ^
   --icon serial_assistant/assets/app.ico ^
   --add-data "serial_assistant/assets;serial_assistant/assets" ^
   run.py
 ```
+
+产物：`dist/SerialDebugAssistant.exe`
+
+- 约 46 MB，**单文件、免安装、免依赖**（Python 与 Qt 已全部内置），已嵌入应用图标
+- 首次启动会把内容解压到临时目录，约 1–3 秒；之后启动稍快
+- 单文件打包程序有时被杀软误报，必要时加白名单
+- 仓库已自带 `SerialDebugAssistant.spec`，后续可直接 `pyinstaller SerialDebugAssistant.spec` 重建
 
 ## 发送内容书写规则
 
