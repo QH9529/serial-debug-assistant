@@ -19,45 +19,17 @@ from serial_assistant.core.scheduler import MessageItem  # noqa: E402
 from serial_assistant.ui.main_window import MainWindow  # noqa: E402
 
 DEMO_ITEMS = [
-    MessageItem(
-        content="01 03 00 00 00 0A",
-        is_hex=True,
-        interval_ms=500,
-        note="读保持寄存器",
-        enabled=True,
-        checksum="crc16",
-    ),
-    MessageItem(
-        content=r"AT+GMR\r\n",
-        is_hex=False,
-        interval_ms=1000,
-        note="查询固件版本",
-        enabled=True,
-        checksum="none",
-    ),
-    MessageItem(
-        content="A5 5A 01 02",
-        is_hex=True,
-        interval_ms=200,
-        note="心跳帧",
-        enabled=False,
-        checksum="sum8",
-    ),
-    MessageItem(
-        content=r"PING\n",
-        is_hex=False,
-        interval_ms=3000,
-        note="保活",
-        enabled=True,
-        checksum="lrc",
-    ),
+    MessageItem(content="01 03 00 00 00 0A", interval_ms=500, note="读保持寄存器", enabled=True),
+    MessageItem(content=r"AT+GMR\r\n", interval_ms=1000, note="查询固件版本", enabled=True),
+    MessageItem(content="A5 5A 01 02", interval_ms=200, note="心跳帧", enabled=False),
+    MessageItem(content=r"PING\n", interval_ms=3000, note="保活", enabled=True),
 ]
 
 DEMO_QUICK = [
-    QuickSlot(label="读寄存器", content="01 03 00 00 00 0A", is_hex=True, checksum="crc16", hotkey="F1"),
+    QuickSlot(label="读寄存器", content="01 03 00 00 00 0A", hotkey="F1"),
     QuickSlot(label="版本查询", content=r"AT+GMR\r\n", hotkey="F2"),
     QuickSlot(label="复位", content="RESET", hotkey="F3"),
-    QuickSlot(label="心跳", content="A5 5A 01 02", is_hex=True, checksum="sum8", hotkey="F4"),
+    QuickSlot(label="心跳", content="A5 5A 01 02", hotkey="F4"),
 ]
 
 DEMO_LOG = [
@@ -67,8 +39,14 @@ DEMO_LOG = [
     ("tx", "AT+GMR"),
     ("rx", "AT version: 1.7.4.0"),
     ("rx", "SDK version: 3.0.4"),
-    ("sys", "循环发送已启动：3 条，顺序轮询"),
+    ("sys", "循环发送已启动：3 条，统一周期 1000 ms"),
     ("tx", "A5 5A 01 02 4C"),
+]
+
+DEMO_LOG_2 = [
+    ("sys", "已打开 COM9 @ 9600"),
+    ("rx", "TEMP=25.6C HUMI=48%"),
+    ("rx", "TEMP=25.7C HUMI=48%"),
 ]
 
 
@@ -78,16 +56,39 @@ def main() -> int:
 
     app = QApplication([])
     settings = QSettings(str(out_dir / "preview.ini"), QSettings.IniFormat)
-    window = MainWindow(settings=settings)
-    window.send_table.set_items(DEMO_ITEMS)
-    window.quick_panel.set_slots(DEMO_QUICK)
-    window.tx_text.setPlainText("01 03 00 00 00 0A")
-    window.mode_combo.setCurrentText("HEX")
-    window.rx_text.clear()
+    window = MainWindow(settings=settings, interactive=False)
+
+    first = window.current_session()
+    first.send_table.set_items(DEMO_ITEMS)
+    first.quick_panel.set_slots(DEMO_QUICK)
+    first.tx_text.setPlainText("01 03 00 00 00 0A")
+    first.mode_combo.setCurrentText("HEX")
+    first.rx_text.clear()
     for kind, text in DEMO_LOG:
-        window._append_line(kind, text)
-    window._set_conn_state(True, "COM7 @ 115200")
+        first._append_line(kind, text)
+    first._set_conn_state(True, "COM7 @ 115200")
+    first.uniform_cb.setChecked(True)
+    first.period_spin.setValue(1000)
+
+    second = window.add_session()
+    second.port_combo.addItem("COM9")
+    second.port_combo.setCurrentText("COM9")
+    second.baud_combo.setCurrentText("9600")
+    for kind, text in DEMO_LOG_2:
+        second._append_line(kind, text)
+    second._set_conn_state(True, "COM9 @ 9600")
+    second.send_table.set_items([MessageItem(content="AA 55", interval_ms=1000, note="心跳", enabled=True)])
+
+    window.tabs.setTabText(0, "● COM7")
+    window.tabs.setTabText(1, "● COM9（转发中）")
     window.resize(1280, 820)
+
+    # 会话 1 收到的数据转发到会话 2，展示「串口间转发」配置
+    first.refresh_forward_targets(window.sessions())
+    index = first.forward_combo.findData(second.session_id)
+    if index > 0:
+        first.forward_combo.setCurrentIndex(index)
+    window.tabs.setCurrentIndex(0)
 
     for name in ("dark", "light"):
         window._theme_name = name

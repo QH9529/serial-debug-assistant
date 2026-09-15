@@ -301,12 +301,23 @@ def build_palette(theme: dict) -> QPalette:
     return palette
 
 
+_APPLIED = {"name": None, "stylesheet": ""}
+
+
 def apply_theme(app: QApplication, name: str) -> dict:
-    """应用主题（深色 / 浅色），返回该主题的令牌字典。"""
+    """应用主题（深色 / 浅色），返回该主题的令牌字典。
+
+    主题是应用级全局设置，重复应用同一主题只是浪费（尤其在多窗口/反复建窗时），
+    因此这里做了幂等缓存。
+    """
     theme = THEMES.get(name, DARK)
-    app.setStyle("Fusion")
-    app.setPalette(build_palette(theme))
-    app.setStyleSheet(build_qss(theme))
+    if _APPLIED["name"] != theme["name"] or not app.styleSheet():
+        app.setStyle("Fusion")
+        app.setPalette(build_palette(theme))
+        stylesheet = build_qss(theme)
+        app.setStyleSheet(stylesheet)
+        _APPLIED["name"] = theme["name"]
+        _APPLIED["stylesheet"] = stylesheet
     return theme
 
 
