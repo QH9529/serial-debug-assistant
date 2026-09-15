@@ -10,11 +10,6 @@ MODE_SEQUENTIAL = "sequential"
 MODE_PER_ITEM = "per_item"
 MODES = (MODE_SEQUENTIAL, MODE_PER_ITEM)
 
-MODE_LABELS = {
-    MODE_SEQUENTIAL: "顺序轮询",
-    MODE_PER_ITEM: "单条周期",
-}
-
 
 @dataclass
 class MessageItem:

@@ -178,17 +178,19 @@ def test_uniform_period_loop_payloads(windows):
 def test_send_stats_and_clear(windows):
     window = windows()
     window.tx_text.setPlainText("AB")
-    window._update_send_stats()
+    window._refresh_send_stats()
     assert window.send_stats_label.text() == "2 字节"
+    assert window._compute_send_size() == 2
 
     window.mode_combo.setCurrentText("HEX")
     window.tx_text.setPlainText("41 42")
-    window._update_send_stats()
+    window._refresh_send_stats()
     assert window.send_stats_label.text() == "2 字节"
 
     window.tx_text.setPlainText("ZZ")
-    window._update_send_stats()
+    window._refresh_send_stats()
     assert window.send_stats_label.text() == "编码错误"
+    assert window._compute_send_size() is None
 
     window.mode_combo.setCurrentText("文本")
     window.tx_text.setPlainText("hello")
@@ -310,6 +312,47 @@ def test_interval_cell_and_header_centered(windows):
     header = table.table.horizontalHeaderItem(table.COL_INTERVAL)
     assert header.textAlignment() & QtCore.AlignHCenter
     assert table.table.cellWidget(0, table.COL_DELETE).height() == 24
+
+
+def test_log_writes_batched_txt(windows, tmp_path):
+    window = windows()
+    window.log_dir = str(tmp_path)
+    window.log_cb.setChecked(True)
+
+    window._write_log("RX", "AA BB")
+    window._flush_log()
+    files = list(tmp_path.glob("serial_*.txt"))
+    assert len(files) == 1
+    assert "RX AA BB" in files[0].read_text(encoding="utf-8")
+
+    # 句柄常开：继续写仍落在同一个文件
+    window._write_log("TX", "01 02")
+    window._flush_log()
+    assert len(list(tmp_path.glob("serial_*.txt"))) == 1
+    assert "TX 01 02" in files[0].read_text(encoding="utf-8")
+
+    # 关闭日志开关后不再写入
+    window.log_cb.setChecked(False)
+    window._write_log("RX", "FFFF")
+    window._flush_log()
+    assert "FFFF" not in files[0].read_text(encoding="utf-8")
+
+
+def test_port_combo_rebuilt_only_on_change(windows, monkeypatch):
+    import serial_assistant.ui.main_window as mw
+
+    window = windows()
+    monkeypatch.setattr(mw, "list_available_ports", lambda: ["COM1", "COM2"])
+    window.refresh_ports()
+    assert window.port_combo.count() == 2
+    assert window._ports_cache == ["COM1", "COM2"]
+
+    window.refresh_ports()
+    assert window.port_combo.count() == 2
+
+    monkeypatch.setattr(mw, "list_available_ports", lambda: ["COM1", "COM2", "COM3"])
+    window.refresh_ports()
+    assert window.port_combo.count() == 3
 
 
 def test_quick_panel_empty_hint_not_duplicated(windows):

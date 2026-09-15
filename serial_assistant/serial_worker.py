@@ -1,6 +1,8 @@
 """串口 IO 工作线程：串口读写与循环发送均在独立线程内完成。"""
 from __future__ import annotations
 
+import time
+
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from serial import Serial, SerialException
 from serial.tools import list_ports
@@ -16,6 +18,8 @@ def list_available_ports():
 
 class SerialWorker(QObject):
     """在工作线程中运行的串口读写对象。"""
+
+    RECONNECT_NOTICE_SECONDS = 10.0
 
     data_received = Signal(object)
     bytes_sent = Signal(int)
@@ -38,6 +42,7 @@ class SerialWorker(QObject):
         self._scheduler = None
         self._payloads = {}
         self._row_map = []
+        self._last_reconnect_notice = 0.0
         self._read_timer = QTimer(self)
         self._read_timer.setInterval(self.READ_INTERVAL_MS)
         self._read_timer.timeout.connect(self._poll_read)
@@ -60,7 +65,8 @@ class SerialWorker(QObject):
                 f"已打开 {config.get('port', '')} @ {config.get('baudrate', '')}"
             )
 
-    def _open(self) -> bool:
+    def _open(self, silent: bool = False) -> bool:
+        """打开串口；silent=True 时不弹错误（用于自动重连轮询）。"""
         self._close_serial()
         cfg = self._config or {}
         flow = cfg.get("flow")
@@ -82,7 +88,8 @@ class SerialWorker(QObject):
             return True
         except (SerialException, OSError, ValueError) as exc:
             self._serial = None
-            self.error_occurred.emit(f"打开串口失败：{exc}")
+            if not silent:
+                self.error_occurred.emit(f"打开串口失败：{exc}")
             return False
 
     def _close_serial(self):
@@ -119,11 +126,17 @@ class SerialWorker(QObject):
         if self.is_open:
             self._reconnect_timer.stop()
             return
-        if self._open():
+        if self._open(silent=True):
             self._reconnect_timer.stop()
             self._read_timer.start()
             self.port_opened.emit(str((self._config or {}).get("port", "")))
             self.status_changed.emit("自动重连成功")
+            self._last_reconnect_notice = 0.0
+            return
+        now = time.monotonic()
+        if now - self._last_reconnect_notice >= self.RECONNECT_NOTICE_SECONDS:
+            self._last_reconnect_notice = now
+            self.status_changed.emit("自动重连中：暂未找到可用串口")
 
     # ---------- 收发 ----------
     @Slot(object)

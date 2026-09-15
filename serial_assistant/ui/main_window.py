@@ -44,7 +44,7 @@ from ..core.scheduler import MODE_PER_ITEM, MODE_SEQUENTIAL
 from ..serial_worker import SerialWorkerController, list_available_ports
 from . import theme as theme_mod
 from .quick_panel import QuickSendPanel, QuickSlotDialog
-from .send_table import CHECKSUM_LABELS, SendTableWidget
+from .send_table import CHECKSUM_LABELS, CHECKSUM_TOOLTIPS, SendTableWidget
 
 BAUD_RATES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
 
@@ -94,6 +94,9 @@ def hotkey_sequence(text: str):
 
 LOG_DIR = "logs"
 MAX_LOG_BLOCKS = 20000  # 日志视图保留的最大行数，超出后丢弃最旧行（内存恒定）
+LOG_FLUSH_MS = 250  # 日志文件批量落盘间隔
+COUNT_REFRESH_MS = 120  # 状态栏计数刷新节流
+STATS_DEBOUNCE_MS = 150  # 发送字节数统计防抖
 KIND_LABELS = {"rx": "RX", "tx": "TX", "sys": "SYS"}
 FILE_CHUNK = 1024
 FILE_INTERVAL_MS = 10
@@ -119,6 +122,9 @@ class MainWindow(QMainWindow):
         self._tx_count = 0
         self._log_path = None
         self._log_day = ""
+        self._log_handle = None
+        self._log_buffer = []
+        self._ports_cache = None
         self._rx_pending = bytearray()
         self._history = history_from_raw(self._settings.value("history"))
         self._quick_shortcuts = []
@@ -349,6 +355,23 @@ class MainWindow(QMainWindow):
         self._wrap_timer = QTimer(self)
         self._wrap_timer.setSingleShot(True)
         self._wrap_timer.timeout.connect(self._flush_pending)
+
+        # 日志文件批量落盘（高频接收时避免每次收发都开关文件）
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(LOG_FLUSH_MS)
+        self._log_flush_timer.timeout.connect(self._flush_log)
+        self._log_flush_timer.start()
+
+        # 计数与字节数刷新节流，避免高频 setText 拖慢界面
+        self._counts_timer = QTimer(self)
+        self._counts_timer.setSingleShot(True)
+        self._counts_timer.setInterval(COUNT_REFRESH_MS)
+        self._counts_timer.timeout.connect(self._refresh_counts)
+
+        self._stats_timer = QTimer(self)
+        self._stats_timer.setSingleShot(True)
+        self._stats_timer.setInterval(STATS_DEBOUNCE_MS)
+        self._stats_timer.timeout.connect(self._refresh_send_stats)
         return panel
 
     def _build_quick_panel(self):
@@ -388,8 +411,12 @@ class MainWindow(QMainWindow):
         self.escape_cb.setChecked(True)
         self.escape_cb.setToolTip("解析 \\n \\r \\t \\0 \\xhh")
         self.checksum_combo = QComboBox()
-        self.checksum_combo.addItems(list(CHECKSUM_LABELS.keys()))
-        self.checksum_combo.setToolTip("发送前追加校验")
+        for label in CHECKSUM_LABELS:
+            self.checksum_combo.addItem(label)
+            self.checksum_combo.setItemData(
+                self.checksum_combo.count() - 1, CHECKSUM_TOOLTIPS.get(label, ""), Qt.ToolTipRole
+            )
+        self.checksum_combo.setToolTip("发送前追加校验（单次 / 快捷 / 循环共用）")
         self.send_btn = QPushButton("发 送")
         self.send_btn.setObjectName("primary")
         self.send_btn.setMinimumWidth(92)
@@ -624,13 +651,18 @@ class MainWindow(QMainWindow):
 
     # ---------- 串口 ----------
     def refresh_ports(self):
+        """刷新端口列表；列表没变化时不重建下拉框，避免无谓闪动与失焦。"""
         current = self.port_combo.currentText()
-        self.port_combo.clear()
         try:
             ports = list_available_ports()
         except Exception:
             ports = []
-        self.port_combo.addItems(ports)
+        if ports != self._ports_cache:
+            self._ports_cache = list(ports)
+            self.port_combo.blockSignals(True)
+            self.port_combo.clear()
+            self.port_combo.addItems(ports)
+            self.port_combo.blockSignals(False)
         if current:
             index = self.port_combo.findText(current)
             if index >= 0:
@@ -748,9 +780,8 @@ class MainWindow(QMainWindow):
     def _on_data_received(self, payload):
         data = bytes(payload)
         self._rx_count += len(data)
-        self.rx_label.setText(f"RX {self._rx_count} B")
-        if self.log_cb.isChecked():
-            self._write_log("RX", bytes_to_hex(data))
+        self._mark_counts_dirty()
+        self._write_log("RX", bytes_to_hex(data))
         if self.auto_wrap_cb.isChecked():
             self._rx_pending += data
             self._wrap_timer.start(self.wrap_spin.value())
@@ -766,6 +797,15 @@ class MainWindow(QMainWindow):
 
     def _on_bytes_sent(self, count: int):
         self._tx_count += int(count)
+        self._mark_counts_dirty()
+
+    def _mark_counts_dirty(self):
+        """计数变化时只标记脏，由定时器统一刷新标签（高频收发时明显省开销）。"""
+        if not self._counts_timer.isActive():
+            self._counts_timer.start()
+
+    def _refresh_counts(self):
+        self.rx_label.setText(f"RX {self._rx_count} B")
         self.tx_label.setText(f"TX {self._tx_count} B")
 
     @staticmethod
@@ -774,17 +814,40 @@ class MainWindow(QMainWindow):
         return datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
     def _write_log(self, tag: str, text: str):
+        """把日志行放进缓冲区，由定时器批量落盘（高频接收时不阻塞界面）。"""
+        if not self.log_cb.isChecked():
+            return
+        self._log_buffer.append(f"[{self._timestamp()}] {tag} {text}")
+        if len(self._log_buffer) >= 500:
+            self._flush_log()
+
+    def _flush_log(self):
+        if not self._log_buffer:
+            return
+        payload = "\n".join(self._log_buffer) + "\n"
+        self._log_buffer.clear()
         day = time.strftime("%Y-%m-%d")
         try:
-            if self._log_path is None or self._log_day != day:
+            if self._log_handle is None or self._log_day != day:
+                self._close_log_handle()
                 base = Path(self.log_dir) if self.log_dir else Path(LOG_DIR)
                 base.mkdir(parents=True, exist_ok=True)
                 self._log_path = base / f"serial_{day}.txt"
                 self._log_day = day
-            with open(self._log_path, "a", encoding="utf-8") as handle:
-                handle.write(f"[{self._timestamp()}] {tag} {text}\n")
+                self._log_handle = open(self._log_path, "a", encoding="utf-8")
+            self._log_handle.write(payload)
+            self._log_handle.flush()
         except OSError as exc:
             self.statusBar().showMessage(f"日志写入失败：{exc}")
+            self._close_log_handle()
+
+    def _close_log_handle(self):
+        if self._log_handle is not None:
+            try:
+                self._log_handle.close()
+            except OSError:
+                pass
+        self._log_handle = None
 
     # ---------- 发送 ----------
     def _build_payload(self, text, is_hex, use_escapes, checksum, ending) -> bytes:
@@ -1007,6 +1070,11 @@ class MainWindow(QMainWindow):
         self.history_combo.setCurrentIndex(0)
 
     def _update_send_stats(self, *_):
+        """输入变化时防抖，避免每敲一个字都重新编码整段文本。"""
+        self._stats_timer.start()
+
+    def _compute_send_size(self):
+        """返回本次将发送的字节数；编码非法时返回 None。"""
         try:
             payload = self._build_payload(
                 self.tx_text.toPlainText(),
@@ -1016,9 +1084,12 @@ class MainWindow(QMainWindow):
                 str(self.line_ending_combo.currentData()),
             )
         except ValueError:
-            self.send_stats_label.setText("编码错误")
-            return
-        self.send_stats_label.setText(f"{len(payload)} 字节")
+            return None
+        return len(payload)
+
+    def _refresh_send_stats(self):
+        size = self._compute_send_size()
+        self.send_stats_label.setText("编码错误" if size is None else f"{size} 字节")
 
     def _update_checksum_hint(self, *_):
         self.checksum_hint.setText("模式·校验共用")
@@ -1057,6 +1128,8 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         self.log_dir = folder
+        self._flush_log()
+        self._close_log_handle()
         self._log_path = None
         self._log_dir_btn_tooltip()
         self._settings.setValue("log_dir", folder)
@@ -1129,7 +1202,7 @@ class MainWindow(QMainWindow):
         self._refresh_quick_shortcuts()
         self._refresh_history_combo()
         self._update_checksum_hint()
-        self._update_send_stats()
+        self._refresh_send_stats()
         self._apply_theme()
 
     def _save_settings(self):
@@ -1158,10 +1231,13 @@ class MainWindow(QMainWindow):
         try:
             self._file_timer.stop()
             self._auto_send_timer.stop()
+            self._log_flush_timer.stop()
             self._flush_pending()
+            self._flush_log()
             self._controller.loop_stop_requested.emit()
             self._controller.close_requested.emit()
             self._controller.shutdown()
         finally:
+            self._close_log_handle()
             self._save_settings()
             event.accept()

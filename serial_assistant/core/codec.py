@@ -80,9 +80,6 @@ def encode_payload(text: str, is_hex: bool, use_escapes: bool = True) -> bytes:
 
 # ---------- 显示与换行 ----------
 
-DISPLAY_MODES = ("text", "hex", "both")
-ENCODINGS = ("utf-8", "gbk", "utf-16", "ascii", "latin-1")
-LINE_ENDINGS = ("none", "cr", "lf", "crlf")
 _LINE_ENDING_BYTES = {
     "none": b"",
     "cr": b"\r",
