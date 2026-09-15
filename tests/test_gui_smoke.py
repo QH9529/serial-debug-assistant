@@ -162,6 +162,19 @@ def test_control_lines_and_payload_builder(windows):
     assert window._build_payload("41 42", True, True, "none", "none") == b"AB"
 
 
+def test_uniform_period_loop_payloads(windows):
+    window = windows()
+    window.send_table.set_items(_items())
+    assert [p["interval_ms"] for p in window._collect_loop_payloads()] == [200, 1000]
+
+    window.uniform_cb.setChecked(True)
+    window.period_spin.setValue(500)
+    assert [p["interval_ms"] for p in window._collect_loop_payloads()] == [500, 500]
+
+    # 禁用项不参与
+    assert len(window._collect_loop_payloads()) == 2
+
+
 def test_module_selftest_subprocess():
     result = subprocess.run(
         [sys.executable, "-m", "serial_assistant", "--selftest"],

@@ -423,6 +423,16 @@ class MainWindow(QMainWindow):
         row1.addWidget(mode_tag)
         row1.addWidget(self.mode_combo_loop)
         row1.addSpacing(6)
+        self.uniform_cb = QCheckBox("统一周期")
+        self.uniform_cb.setToolTip("勾选后所有条目都用右侧这一个周期发送（SSCOM 式多字符串循环）")
+        self.period_spin = QSpinBox()
+        self.period_spin.setRange(1, 600000)
+        self.period_spin.setSingleStep(50)
+        self.period_spin.setValue(1000)
+        self.period_spin.setSuffix(" ms")
+        row1.addWidget(self.uniform_cb)
+        row1.addWidget(self.period_spin)
+        row1.addSpacing(6)
         for button in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
             row1.addWidget(button)
         row1.addStretch(1)
@@ -430,8 +440,10 @@ class MainWindow(QMainWindow):
 
         row2 = QHBoxLayout()
         row2.setSpacing(6)
-        if hasattr(self, "loop_progress"):
-            row2.addWidget(self.loop_progress)
+        self.send_once_btn = QPushButton("发送一次")
+        self.send_once_btn.setObjectName("ghost")
+        self.send_once_btn.setToolTip("把勾选的条目按列表顺序各发一遍，不启动循环")
+        row2.addWidget(self.send_once_btn)
         row2.addStretch(1)
         row2.addWidget(self.save_btn)
         row2.addWidget(self.load_btn)
@@ -467,6 +479,7 @@ class MainWindow(QMainWindow):
         self.save_btn.clicked.connect(self._save_scheme)
         self.load_btn.clicked.connect(self._load_scheme)
         self.loop_btn.clicked.connect(self._toggle_loop)
+        self.send_once_btn.clicked.connect(self._send_checked_once)
 
         self.quick_panel.send_requested.connect(self._on_quick_send)
         self.quick_panel.add_requested.connect(self._on_quick_add)
@@ -791,6 +804,45 @@ class MainWindow(QMainWindow):
         self._append_line("sys", message)
 
     # ---------- 循环发送 ----------
+    def _collect_loop_payloads(self):
+        """收集勾选且非空的条目；开启「统一周期」时全部用全局周期（SSCOM 式）。"""
+        uniform = self.uniform_cb.isChecked()
+        period = self.period_spin.value()
+        items = self.send_table.get_items()
+        payloads = []
+        for row, item in enumerate(items):
+            if not item.enabled or not item.content.strip():
+                continue
+            try:
+                raw = encode_payload(item.content, item.is_hex, True)
+            except ValueError as exc:
+                raise ValueError(f"第 {row + 1} 条编码错误：{exc}") from exc
+            payloads.append(
+                {
+                    "index": row,
+                    "payload": append_checksum(raw, item.checksum),
+                    "interval_ms": period if uniform else item.interval_ms,
+                }
+            )
+        return payloads
+
+    def _send_checked_once(self):
+        if not self._port_open:
+            self._warn("请先打开串口")
+            return
+        try:
+            payloads = self._collect_loop_payloads()
+        except ValueError as exc:
+            self._warn(str(exc))
+            return
+        if not payloads:
+            self._warn("没有启用的发送条目")
+            return
+        for entry in payloads:
+            self._controller.send_requested.emit(entry["payload"])
+            self._append_line("tx", bytes_to_hex(entry["payload"]))
+        self.statusBar().showMessage(f"已按顺序发送 {len(payloads)} 条勾选指令")
+
     def _toggle_loop(self):
         if self._loop_active:
             self._controller.loop_stop_requested.emit()
@@ -801,32 +853,24 @@ class MainWindow(QMainWindow):
         if not self._port_open:
             self._warn("请先打开串口再启动循环发送")
             return
-        items = self.send_table.get_items()
-        payloads = []
-        for row, item in enumerate(items):
-            if not item.enabled or not item.content.strip():
-                continue
-            try:
-                raw = encode_payload(item.content, item.is_hex, True)
-            except ValueError as exc:
-                self._warn(f"第 {row + 1} 条编码错误：{exc}")
-                return
-            payloads.append(
-                {
-                    "index": row,
-                    "payload": append_checksum(raw, item.checksum),
-                    "interval_ms": item.interval_ms,
-                }
-            )
+        try:
+            payloads = self._collect_loop_payloads()
+        except ValueError as exc:
+            self._warn(str(exc))
+            return
         if not payloads:
             self._warn("没有启用的发送条目")
             return
         mode = self.mode_combo_loop.currentData() or MODE_SEQUENTIAL
-        self._controller.loop_requested.emit({"mode": mode, "payloads": payloads})
+        if self.uniform_cb.isChecked() and mode == MODE_SEQUENTIAL:
+            self._controller.loop_requested.emit({"mode": MODE_SEQUENTIAL, "payloads": payloads})
+            label = f"统一周期 {self.period_spin.value()} ms"
+        else:
+            self._controller.loop_requested.emit({"mode": mode, "payloads": payloads})
+            label = "顺序轮询" if mode == MODE_SEQUENTIAL else "单条周期"
         self._set_loop_ui(True)
-        mode_label = "顺序轮询" if mode == MODE_SEQUENTIAL else "单条周期"
-        self.statusBar().showMessage(f"循环发送已启动：{len(payloads)} 条，{mode_label}")
-        self._append_line("sys", f"循环发送已启动：{len(payloads)} 条，{mode_label}")
+        self.statusBar().showMessage(f"循环发送已启动：{len(payloads)} 条，{label}")
+        self._append_line("sys", f"循环发送已启动：{len(payloads)} 条，{label}")
 
     def _set_loop_ui(self, active: bool):
         self._loop_active = active
@@ -894,6 +938,8 @@ class MainWindow(QMainWindow):
         self.wrap_spin.setValue(int(settings.value("wrap_ms", 200) or 200))
         self.rts_cb.setChecked(settings.value("rts", "true") in (True, "true"))
         self.dtr_cb.setChecked(settings.value("dtr", "true") in (True, "true"))
+        self.uniform_cb.setChecked(settings.value("uniform", "false") in (True, "true"))
+        self.period_spin.setValue(int(settings.value("period_ms", 1000) or 1000))
 
         self.quick_panel.set_slots(load_slots(settings.value("quick_slots")))
         self._refresh_quick_shortcuts()
@@ -913,6 +959,8 @@ class MainWindow(QMainWindow):
         settings.setValue("wrap_ms", self.wrap_spin.value())
         settings.setValue("rts", self.rts_cb.isChecked())
         settings.setValue("dtr", self.dtr_cb.isChecked())
+        settings.setValue("uniform", self.uniform_cb.isChecked())
+        settings.setValue("period_ms", self.period_spin.value())
         settings.setValue("quick_slots", dump_slots(self.quick_panel.get_slots()))
         settings.setValue("history", dump_history(self._history))
 
