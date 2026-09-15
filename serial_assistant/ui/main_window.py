@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
     def __init__(self, parent=None, settings=None):
         super().__init__(parent)
         self.setWindowTitle("串口调试助手")
-        self.resize(1240, 880)
+        self.resize(1240, 800)
 
         self._settings = settings or QSettings("QH9529", "SerialDebugAssistant")
         self._theme_name = str(self._settings.value("theme", "dark") or "dark")
@@ -143,17 +143,26 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self._build_connection_bar())
 
-        # 只分上下：接收日志在上；下方依次为单次发送 / 快捷发送 / 多条循环发送（均整行占满）
+        # 上下分区：上 = 接收日志；下 = 发送区（左：单次发送 + 快捷发送；右：多条循环发送）
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self._build_log_panel())
-        splitter.addWidget(self._build_send_panel())
-        splitter.addWidget(self._build_quick_panel())
-        splitter.addWidget(self._build_loop_panel())
+
+        send_row = QSplitter(Qt.Horizontal)
+        send_left = QSplitter(Qt.Vertical)
+        send_left.addWidget(self._build_send_panel())
+        send_left.addWidget(self._build_quick_panel())
+        send_left.setStretchFactor(0, 1)
+        send_left.setStretchFactor(1, 0)
+        send_row.addWidget(send_left)
+        send_row.addWidget(self._build_loop_panel())
+        send_row.setStretchFactor(0, 1)
+        send_row.setStretchFactor(1, 1)
+        send_row.setSizes([560, 660])
+        splitter.addWidget(send_row)
+
         splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 0)
-        splitter.setStretchFactor(2, 0)
-        splitter.setStretchFactor(3, 2)
-        splitter.setSizes([330, 150, 90, 250])
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([420, 300])
         layout.addWidget(splitter, 1)
 
         status = self.statusBar()
