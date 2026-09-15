@@ -272,6 +272,35 @@ def test_loop_echoes_sent_frames(windows):
     assert "A5 5A" not in window.rx_text.toPlainText()
 
 
+def test_app_header_icon_and_version(windows):
+    from serial_assistant import __version__, resources
+    from serial_assistant.ui.main_window import APP_VERSION_LABEL
+
+    window = windows()
+    assert APP_VERSION_LABEL == f"V{__version__}"
+    assert window.version_label.text() == APP_VERSION_LABEL
+    assert window.app_name_label.text() == "串口调试助手"
+    assert "串口调试助手" in window.windowTitle()
+    assert not window.windowIcon().isNull()
+    assert resources.asset_path("app.ico") is not None
+    assert resources.asset_path("app.png") is not None
+
+
+def test_interval_cell_and_header_centered(windows):
+    from PySide6.QtCore import Qt as QtCore
+
+    window = windows()
+    table = window.send_table
+    table.set_items(_items())
+
+    spin = table.table.cellWidget(0, table.COL_INTERVAL)
+    assert spin.alignment() & QtCore.AlignHCenter
+
+    header = table.table.horizontalHeaderItem(table.COL_INTERVAL)
+    assert header.textAlignment() & QtCore.AlignHCenter
+    assert table.table.cellWidget(0, table.COL_DELETE).height() == 24
+
+
 def test_module_selftest_subprocess():
     result = subprocess.run(
         [sys.executable, "-m", "serial_assistant", "--selftest"],

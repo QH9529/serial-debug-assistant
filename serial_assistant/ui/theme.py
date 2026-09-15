@@ -125,6 +125,13 @@ QLabel#panelTitle {{
     background: transparent;
 }}
 QLabel#hint {{ color: {muted}; background: transparent; }}
+QLabel#appName {{
+    font-size: 14px;
+    font-weight: 600;
+    color: {fg};
+    background: transparent;
+}}
+QLabel#appIcon {{ background: transparent; }}
 QLabel#pill {{
     background-color: {surface_alt};
     border: 1px solid {border};

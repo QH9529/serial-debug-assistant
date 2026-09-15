@@ -10,10 +10,16 @@ def main(argv=None) -> int:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
-    from .ui.main_window import MainWindow
+    from . import __version__, resources
+    from .ui.main_window import APP_NAME, APP_VERSION_LABEL, MainWindow
 
     app = QApplication(argv)
-    app.setApplicationName("串口调试助手")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(__version__)
+    app.setApplicationDisplayName(f"{APP_NAME} {APP_VERSION_LABEL}")
+    icon = resources.app_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
     window = MainWindow()
     window.show()

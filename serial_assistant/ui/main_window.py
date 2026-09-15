@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__, resources
 from ..core.checksum import append_checksum
 from ..core.codec import bytes_to_hex, encode_payload, format_display, line_ending
 from ..core.profile import ProfileError, load_profile, save_profile
@@ -46,6 +47,10 @@ from .quick_panel import QuickSendPanel, QuickSlotDialog
 from .send_table import CHECKSUM_LABELS, SendTableWidget
 
 BAUD_RATES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
+
+APP_NAME = "串口调试助手"
+APP_VERSION = __version__
+APP_VERSION_LABEL = f"V{APP_VERSION}"
 
 PARITY_MAP = {"无校验": "N", "偶校验": "E", "奇校验": "O"}
 FLOW_MAP = {"无流控": None, "RTS/CTS": "rtscts", "XON/XOFF": "xonxoff"}
@@ -97,8 +102,12 @@ FILE_INTERVAL_MS = 10
 class MainWindow(QMainWindow):
     def __init__(self, parent=None, settings=None):
         super().__init__(parent)
-        self.setWindowTitle("串口调试助手")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION_LABEL}")
         self.resize(1240, 800)
+
+        icon = resources.app_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
 
         self._settings = settings or QSettings("QH9529", "SerialDebugAssistant")
         self._theme_name = str(self._settings.value("theme", "dark") or "dark")
@@ -141,6 +150,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 14, 14, 10)
         layout.setSpacing(12)
 
+        layout.addLayout(self._build_header())
         layout.addWidget(self._build_connection_bar())
 
         # 左右分区：左 = 接收日志；右 = 发送区（上：快捷发送 / 中：单次发送 / 下：多条循环发送）
@@ -178,6 +188,30 @@ class MainWindow(QMainWindow):
             label.setObjectName("panelTitle")
             layout.addWidget(label)
         return frame, layout
+
+    def _build_header(self):
+        """左上角品牌区：应用图标 + 名称 + 版本号。"""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.setContentsMargins(2, 0, 0, 0)
+
+        self.icon_label = QLabel()
+        self.icon_label.setObjectName("appIcon")
+        icon = resources.app_icon()
+        if not icon.isNull():
+            self.icon_label.setPixmap(icon.pixmap(24, 24))
+            self.icon_label.setFixedSize(24, 24)
+        self.app_name_label = QLabel(APP_NAME)
+        self.app_name_label.setObjectName("appName")
+        self.version_label = QLabel(APP_VERSION_LABEL)
+        self.version_label.setObjectName("pill")
+        self.version_label.setToolTip(f"当前版本 {APP_VERSION_LABEL}")
+
+        row.addWidget(self.icon_label)
+        row.addWidget(self.app_name_label)
+        row.addWidget(self.version_label)
+        row.addStretch(1)
+        return row
 
     def _build_connection_bar(self):
         panel, layout = self._panel("串口连接")

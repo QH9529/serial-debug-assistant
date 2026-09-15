@@ -1,5 +1,7 @@
 # 串口调试助手 Serial Debug Assistant
 
+当前版本：**V1.0.0**（界面左上角显示；应用图标见 `serial_assistant/assets/app.ico`）
+
 跨平台串口调试助手，核心特色是**多条数据循环发送**。基于 Python 3.12+ + PySide6 + pyserial。
 
 ## 功能（V1）
@@ -54,7 +56,10 @@ python -m pytest
 
 ```bash
 pip install pyinstaller
-pyinstaller --noconfirm --windowed --name SerialDebugAssistant run.py
+pyinstaller --noconfirm --windowed --name SerialDebugAssistant ^
+  --icon serial_assistant/assets/app.ico ^
+  --add-data "serial_assistant/assets;serial_assistant/assets" ^
+  run.py
 ```
 
 ## 发送内容书写规则

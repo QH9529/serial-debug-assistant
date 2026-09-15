@@ -53,6 +53,10 @@ class SendTableWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.table = QTableWidget(0, 5, self)
         self.table.setHorizontalHeaderLabels(["启用", "内容（模式与校验见发送区）", "间隔(ms)", "备注", ""])
+        for column in (self.COL_ENABLED, self.COL_INTERVAL, self.COL_DELETE):
+            item = self.table.horizontalHeaderItem(column)
+            if item is not None:
+                item.setTextAlignment(Qt.AlignCenter)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(self.COL_CONTENT, QHeaderView.Stretch)
         self.table.setColumnWidth(self.COL_ENABLED, 46)
@@ -85,6 +89,7 @@ class SendTableWidget(QWidget):
         interval.setRange(1, MAX_INTERVAL_MS)
         interval.setSingleStep(50)
         interval.setValue(max(1, int(item.interval_ms)))
+        interval.setAlignment(Qt.AlignCenter)
         interval.setToolTip("这条指令发送后等待的间隔；勾选「统一周期」时以全局周期为准")
         self.table.setCellWidget(row, self.COL_INTERVAL, interval)
 
@@ -95,6 +100,7 @@ class SendTableWidget(QWidget):
         delete = QPushButton("删除")
         delete.setObjectName("rowDelete")
         delete.setToolTip("删除这一条")
+        delete.setFixedHeight(24)
         delete.clicked.connect(self._on_row_delete)
         self.table.setCellWidget(row, self.COL_DELETE, delete)
         return row
