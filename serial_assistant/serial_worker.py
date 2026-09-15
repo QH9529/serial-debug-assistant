@@ -5,12 +5,13 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from serial import Serial, SerialException
 from serial.tools import list_ports
 
+from .core.ports import sort_ports
 from .core.scheduler import LoopScheduler, MessageItem
 
 
 def list_available_ports():
-    """当前可用串口设备名列表。"""
-    return [p.device for p in list_ports.comports()]
+    """当前可用串口设备名列表，按数字自然升序（COM2 排在 COM10 前）。"""
+    return sort_ports(p.device for p in list_ports.comports())
 
 
 class SerialWorker(QObject):
