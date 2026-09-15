@@ -13,6 +13,12 @@
 - 校验自动追加：CRC16-Modbus（低字节在前）、SUM8 累加和、LRC
 - 方案保存 / 加载：JSON 文件（UTF-8），可读可手改
 
+## 界面
+
+- 默认深色主题（铜橙单一强调色），可在顶部「浅色主题」按钮一键切换，选择会记住
+- 日志区等宽字体，按 RX / TX / SYS 分类着色，便于快速区分收发
+- 生成预览图：`python tools/preview.py preview`（无显示器环境也可用，输出 `preview/ui-dark.png`、`preview/ui-light.png`）
+
 ## 运行
 
 ```bash

@@ -1,16 +1,19 @@
-"""主窗口。"""
+"""主窗口：串口参数、接收日志、单次发送与多条循环发送。"""
 from __future__ import annotations
 
+import html
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QGridLayout,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -18,6 +21,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +31,7 @@ from ..core.codec import bytes_to_hex, encode_payload
 from ..core.profile import ProfileError, load_profile, save_profile
 from ..core.scheduler import MODE_PER_ITEM, MODE_SEQUENTIAL
 from ..serial_worker import SerialWorkerController, list_available_ports
+from . import theme as theme_mod
 from .send_table import CHECKSUM_LABELS, SendTableWidget
 
 BAUD_RATES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
@@ -35,15 +40,19 @@ PARITY_MAP = {"无": "N", "偶校验": "E", "奇校验": "O"}
 FLOW_MAP = {"无": None, "硬件 RTS/CTS": "rtscts", "软件 XON/XOFF": "xonxoff"}
 
 LOG_DIR = "logs"
+KIND_LABELS = {"rx": "RX", "tx": "TX", "sys": "SYS"}
 
 
 class MainWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("串口调试助手")
-        self.resize(960, 780)
+        self.resize(1180, 760)
 
         self._settings = QSettings("QH9529", "SerialDebugAssistant")
+        self._theme_name = str(self._settings.value("theme", "dark") or "dark")
+        self._theme = theme_mod.current_theme(self._theme_name)
+
         self._port_open = False
         self._loop_active = False
         self._rx_count = 0
@@ -58,30 +67,73 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._restore_settings()
         self.refresh_ports()
+        self._append_line("sys", "就绪。选择串口并打开后即可收发；循环发送支持顺序轮询与单条周期两种调度。")
+
+    # ---------- 主题 ----------
+    def _apply_theme(self):
+        app = QApplication.instance()
+        if app is not None:
+            self._theme = theme_mod.apply_theme(app, self._theme_name)
+        if hasattr(self, "theme_btn"):
+            self.theme_btn.setText(f"{self._theme['label']}主题")
 
     # ---------- UI ----------
     def _build_ui(self):
         root = QWidget(self)
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(14, 14, 14, 10)
+        layout.setSpacing(12)
 
-        layout.addWidget(self._build_port_group())
-        layout.addWidget(self._build_receive_group(), 1)
-        layout.addWidget(self._build_send_group())
-        layout.addWidget(self._build_loop_group(), 2)
+        layout.addWidget(self._build_connection_bar())
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(self._build_log_panel())
+
+        right = QSplitter(Qt.Vertical)
+        right.addWidget(self._build_send_panel())
+        right.addWidget(self._build_loop_panel())
+        right.setStretchFactor(0, 0)
+        right.setStretchFactor(1, 1)
+        splitter.addWidget(right)
+
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([620, 540])
+        layout.addWidget(splitter, 1)
 
         self.statusBar().showMessage("就绪")
 
-    def _build_port_group(self):
-        group = QGroupBox("串口参数")
-        grid = QGridLayout(group)
+    @staticmethod
+    def _panel(title: str):
+        frame = QFrame()
+        frame.setObjectName("panel")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 10, 12, 12)
+        layout.setSpacing(8)
+        if title:
+            label = QLabel(title)
+            label.setObjectName("panelTitle")
+            layout.addWidget(label)
+        return frame, layout
+
+    def _build_connection_bar(self):
+        panel, layout = self._panel("串口连接")
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
         self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(150)
+        self.port_combo.setMinimumWidth(132)
+        self.port_combo.setToolTip("可用串口，插拔设备后点「刷新」")
         self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setObjectName("ghost")
+
         self.baud_combo = QComboBox()
         self.baud_combo.setEditable(True)
         self.baud_combo.addItems(BAUD_RATES)
         self.baud_combo.setCurrentText("115200")
+        self.baud_combo.setMinimumWidth(96)
+
         self.databits_combo = QComboBox()
         self.databits_combo.addItems(["8", "7"])
         self.stopbits_combo = QComboBox()
@@ -91,59 +143,84 @@ class MainWindow(QMainWindow):
         self.flow_combo = QComboBox()
         self.flow_combo.addItems(list(FLOW_MAP.keys()))
         self.reconnect_cb = QCheckBox("断线自动重连")
+
         self.open_btn = QPushButton("打开串口")
+        self.open_btn.setObjectName("primary")
 
-        grid.addWidget(QLabel("端口"), 0, 0)
-        grid.addWidget(self.port_combo, 0, 1)
-        grid.addWidget(self.refresh_btn, 0, 2)
-        grid.addWidget(QLabel("波特率"), 0, 3)
-        grid.addWidget(self.baud_combo, 0, 4)
-        grid.addWidget(QLabel("数据位"), 0, 5)
-        grid.addWidget(self.databits_combo, 0, 6)
-        grid.addWidget(QLabel("停止位"), 0, 7)
-        grid.addWidget(self.stopbits_combo, 0, 8)
-        grid.addWidget(QLabel("校验"), 1, 0)
-        grid.addWidget(self.parity_combo, 1, 1)
-        grid.addWidget(QLabel("流控"), 1, 3)
-        grid.addWidget(self.flow_combo, 1, 4)
-        grid.addWidget(self.reconnect_cb, 1, 5, 1, 2)
-        grid.addWidget(self.open_btn, 1, 7, 1, 2)
-        return group
+        self.dot = QLabel()
+        self.dot.setObjectName("dotOff")
+        self.conn_label = QLabel("未连接")
+        self.conn_label.setObjectName("pill")
 
-    def _build_receive_group(self):
-        group = QGroupBox("接收区")
-        layout = QVBoxLayout(group)
-        bar = QHBoxLayout()
+        self.theme_btn = QPushButton(f"{self._theme['label']}主题")
+        self.theme_btn.setObjectName("ghost")
+        self.theme_btn.clicked.connect(self._toggle_theme)
+
+        for label, widget in (
+            ("端口", self.port_combo),
+            (None, self.refresh_btn),
+            ("波特率", self.baud_combo),
+            ("数据位", self.databits_combo),
+            ("停止位", self.stopbits_combo),
+            ("校验", self.parity_combo),
+            ("流控", self.flow_combo),
+        ):
+            if label:
+                tag = QLabel(label)
+                tag.setObjectName("hint")
+                row.addWidget(tag)
+            row.addWidget(widget)
+
+        row.addWidget(self.reconnect_cb)
+        row.addStretch(1)
+        row.addWidget(self.dot)
+        row.addWidget(self.conn_label)
+        row.addWidget(self.open_btn)
+        row.addWidget(self.theme_btn)
+        layout.addLayout(row)
+        return panel
+
+    def _build_log_panel(self):
+        panel, layout = self._panel("接收日志")
+        row = QHBoxLayout()
+        row.setSpacing(10)
         self.hex_display_cb = QCheckBox("HEX 显示")
         self.timestamp_cb = QCheckBox("时间戳")
         self.timestamp_cb.setChecked(True)
         self.pause_cb = QCheckBox("暂停滚动")
         self.log_cb = QCheckBox("自动保存日志")
         self.rx_label = QLabel("RX 0 B")
+        self.rx_label.setObjectName("pill")
         self.tx_label = QLabel("TX 0 B")
+        self.tx_label.setObjectName("pill")
         clear_btn = QPushButton("清空")
+        clear_btn.setObjectName("ghost")
         clear_btn.clicked.connect(self._clear_receive)
+
         for widget in (self.hex_display_cb, self.timestamp_cb, self.pause_cb, self.log_cb):
-            bar.addWidget(widget)
-        bar.addStretch(1)
-        bar.addWidget(self.rx_label)
-        bar.addWidget(self.tx_label)
-        bar.addWidget(clear_btn)
-        layout.addLayout(bar)
+            row.addWidget(widget)
+        row.addStretch(1)
+        row.addWidget(self.rx_label)
+        row.addWidget(self.tx_label)
+        row.addWidget(clear_btn)
+        layout.addLayout(row)
+
         self.rx_text = QPlainTextEdit()
+        self.rx_text.setObjectName("log")
         self.rx_text.setReadOnly(True)
         self.rx_text.document().setMaximumBlockCount(20000)
-        layout.addWidget(self.rx_text)
-        return group
+        layout.addWidget(self.rx_text, 1)
+        return panel
 
-    def _build_send_group(self):
-        group = QGroupBox("单次发送")
-        layout = QVBoxLayout(group)
+    def _build_send_panel(self):
+        panel, layout = self._panel("单次发送")
         self.tx_text = QPlainTextEdit()
-        self.tx_text.setMaximumHeight(72)
-        self.tx_text.setPlaceholderText("输入要发送的内容，文本模式支持 \\n \\r \\t \\xhh 转义")
+        self.tx_text.setMaximumHeight(64)
+        self.tx_text.setPlaceholderText("输入待发送内容：文本模式支持 \\n \\r \\t \\xhh 转义，Ctrl+Enter 直接发送")
         layout.addWidget(self.tx_text)
-        bar = QHBoxLayout()
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["文本", "HEX"])
         self.append_newline_cb = QCheckBox("追加 \\r\\n")
@@ -152,45 +229,74 @@ class MainWindow(QMainWindow):
         self.checksum_combo = QComboBox()
         self.checksum_combo.addItems(list(CHECKSUM_LABELS.keys()))
         self.send_btn = QPushButton("发送")
-        bar.addWidget(QLabel("模式"))
-        bar.addWidget(self.mode_combo)
-        bar.addWidget(self.append_newline_cb)
-        bar.addWidget(self.escape_cb)
-        bar.addWidget(QLabel("校验"))
-        bar.addWidget(self.checksum_combo)
-        bar.addStretch(1)
-        bar.addWidget(self.send_btn)
-        layout.addLayout(bar)
-        return group
+        self.send_btn.setObjectName("ghost")
 
-    def _build_loop_group(self):
-        group = QGroupBox("多条循环发送")
-        layout = QVBoxLayout(group)
-        bar = QHBoxLayout()
+        mode_tag = QLabel("模式")
+        mode_tag.setObjectName("hint")
+        sum_tag = QLabel("校验")
+        sum_tag.setObjectName("hint")
+        row.addWidget(mode_tag)
+        row.addWidget(self.mode_combo)
+        row.addWidget(self.append_newline_cb)
+        row.addWidget(self.escape_cb)
+        row.addWidget(sum_tag)
+        row.addWidget(self.checksum_combo)
+        row.addStretch(1)
+        row.addWidget(self.send_btn)
+        layout.addLayout(row)
+
+        shortcut = QShortcut(QKeySequence("Ctrl+Return"), self.tx_text)
+        shortcut.activated.connect(self._send_once)
+        shortcut2 = QShortcut(QKeySequence("Ctrl+Enter"), self.tx_text)
+        shortcut2.activated.connect(self._send_once)
+        return panel
+
+    def _build_loop_panel(self):
+        panel, layout = self._panel("多条循环发送")
+        row = QHBoxLayout()
+        row.setSpacing(8)
         self.seq_radio = QRadioButton("顺序轮询")
         self.seq_radio.setChecked(True)
+        self.seq_radio.setToolTip("按列表顺序逐条发送，每条发完等待它自己的间隔，到尾后回绕")
         self.per_radio = QRadioButton("单条周期")
+        self.per_radio.setToolTip("每条启用项按自己的周期独立触发")
+
         self.add_btn = QPushButton("添加")
         self.del_btn = QPushButton("删除")
         self.up_btn = QPushButton("上移")
         self.down_btn = QPushButton("下移")
         self.clear_btn = QPushButton("清空")
+        for button in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
+            button.setObjectName("ghost")
+
         self.save_btn = QPushButton("保存方案")
         self.load_btn = QPushButton("加载方案")
+        self.save_btn.setObjectName("ghost")
+        self.load_btn.setObjectName("ghost")
+
         self.loop_btn = QPushButton("开始循环")
-        bar.addWidget(self.seq_radio)
-        bar.addWidget(self.per_radio)
-        bar.addSpacing(12)
-        for widget in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
-            bar.addWidget(widget)
-        bar.addStretch(1)
-        bar.addWidget(self.save_btn)
-        bar.addWidget(self.load_btn)
-        bar.addWidget(self.loop_btn)
-        layout.addLayout(bar)
+        self.loop_btn.setObjectName("primary")
+
+        row.addWidget(self.seq_radio)
+        row.addWidget(self.per_radio)
+        row.addSpacing(10)
+        for button in (self.add_btn, self.del_btn, self.up_btn, self.down_btn, self.clear_btn):
+            row.addWidget(button)
+        row.addStretch(1)
+        row.addWidget(self.save_btn)
+        row.addWidget(self.load_btn)
+        row.addWidget(self.loop_btn)
+        layout.addLayout(row)
+
         self.send_table = SendTableWidget()
-        layout.addWidget(self.send_table)
-        return group
+        table = self.send_table.table
+        table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(30)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        layout.addWidget(self.send_table, 1)
+        return panel
 
     # ---------- 信号 ----------
     def _connect_signals(self):
@@ -214,6 +320,11 @@ class MainWindow(QMainWindow):
         self._worker.port_closed.connect(self._on_port_closed)
         self._worker.port_lost.connect(self._on_port_lost)
         self._worker.loop_sent.connect(self._on_loop_sent)
+
+    def _toggle_theme(self):
+        self._theme_name = "light" if self._theme_name == "dark" else "dark"
+        self._apply_theme()
+        self._settings.setValue("theme", self._theme_name)
 
     # ---------- 串口 ----------
     def refresh_ports(self):
@@ -255,27 +366,41 @@ class MainWindow(QMainWindow):
         }
         self._controller.open_requested.emit(config)
 
+    def _set_conn_state(self, connected: bool, text: str):
+        self._port_open = connected
+        self.dot.setObjectName("dotOn" if connected else "dotOff")
+        self.dot.style().unpolish(self.dot)
+        self.dot.style().polish(self.dot)
+        self.conn_label.setText(text)
+        self.open_btn.setText("关闭串口" if connected else "打开串口")
+
     def _on_port_opened(self, port_name: str):
-        self._port_open = True
-        self.open_btn.setText("关闭串口")
+        baud = self.baud_combo.currentText().strip()
+        self._set_conn_state(True, f"{port_name} @ {baud}")
         self._save_settings()
 
     def _on_port_closed(self):
-        self._port_open = False
-        self.open_btn.setText("打开串口")
+        self._set_conn_state(False, "未连接")
         self._set_loop_ui(False)
 
     def _on_port_lost(self, message: str):
-        self._port_open = False
-        self.open_btn.setText("打开串口")
+        self._set_conn_state(False, "已断开")
         self._set_loop_ui(False)
-        self.statusBar().showMessage(f"{message}（可勾选「断线自动重连」）")
+        self._append_line("sys", f"{message}。可勾选「断线自动重连」。")
+        self.statusBar().showMessage(message)
 
     def _on_status(self, message: str):
         self.statusBar().showMessage(message)
+        if "打开" in message and "已打开" in message:
+            self._append_line("sys", message)
+        elif "重连成功" in message:
+            self._append_line("sys", message)
+        elif "已关闭" in message:
+            self._append_line("sys", message)
 
     def _on_error(self, message: str):
         self.statusBar().showMessage(message)
+        self._append_line("sys", message)
         if "打开串口失败" in message:
             QMessageBox.warning(self, "串口错误", message)
 
@@ -283,29 +408,44 @@ class MainWindow(QMainWindow):
     def _clear_receive(self):
         self.rx_text.clear()
 
+    def _append_line(self, kind: str, text: str):
+        colors = {
+            "rx": self._theme["rx"],
+            "tx": self._theme["tx"],
+            "sys": self._theme["sys"],
+        }
+        color = colors.get(kind, self._theme["sys"])
+        label = KIND_LABELS.get(kind, "SYS")
+        stamp = ""
+        if self.timestamp_cb.isChecked():
+            stamp = f'<span style="color:{self._theme["sys"]}">[{time.strftime("%H:%M:%S")}] </span>'
+        body = html.escape(text)
+        self.rx_text.appendHtml(
+            f'{stamp}<span style="color:{color};font-weight:600">{label}</span> '
+            f'<span style="color:{color}">{body}</span>'
+        )
+
     def _on_data_received(self, payload):
         data = bytes(payload)
         self._rx_count += len(data)
         self.rx_label.setText(f"RX {self._rx_count} B")
-        stamp = time.strftime("%H:%M:%S")
         if self.hex_display_cb.isChecked():
             text = bytes_to_hex(data)
         else:
             text = data.decode("utf-8", errors="replace")
-        line = f"[{stamp}] {text}" if self.timestamp_cb.isChecked() else text
         scrollbar = self.rx_text.verticalScrollBar()
         previous = scrollbar.value()
-        self.rx_text.appendPlainText(line)
+        self._append_line("rx", text)
         if self.pause_cb.isChecked():
             scrollbar.setValue(previous)
         if self.log_cb.isChecked():
-            self._write_log(stamp, data)
+            self._write_log("RX", bytes_to_hex(data))
 
     def _on_bytes_sent(self, count: int):
         self._tx_count += int(count)
         self.tx_label.setText(f"TX {self._tx_count} B")
 
-    def _write_log(self, stamp: str, data: bytes):
+    def _write_log(self, tag: str, text: str):
         day = time.strftime("%Y-%m-%d")
         try:
             if self._log_path is None or self._log_day != day:
@@ -313,7 +453,7 @@ class MainWindow(QMainWindow):
                 self._log_path = Path(LOG_DIR) / f"serial_{day}.log"
                 self._log_day = day
             with open(self._log_path, "a", encoding="utf-8") as handle:
-                handle.write(f"[{stamp}] RX {bytes_to_hex(data)}\n")
+                handle.write(f"[{time.strftime('%H:%M:%S')}] {tag} {text}\n")
         except OSError as exc:
             self.statusBar().showMessage(f"日志写入失败：{exc}")
 
@@ -337,6 +477,7 @@ class MainWindow(QMainWindow):
         if not payload:
             return
         self._controller.send_requested.emit(payload)
+        self._append_line("tx", bytes_to_hex(payload))
 
     # ---------- 循环发送 ----------
     def _toggle_loop(self):
@@ -344,6 +485,7 @@ class MainWindow(QMainWindow):
             self._controller.loop_stop_requested.emit()
             self._set_loop_ui(False)
             self.statusBar().showMessage("循环发送已停止")
+            self._append_line("sys", "循环发送已停止")
             return
         if not self._port_open:
             self._warn("请先打开串口再启动循环发送")
@@ -373,6 +515,7 @@ class MainWindow(QMainWindow):
         self._set_loop_ui(True)
         mode_label = "顺序轮询" if mode == MODE_SEQUENTIAL else "单条周期"
         self.statusBar().showMessage(f"循环发送已启动：{len(payloads)} 条，{mode_label}")
+        self._append_line("sys", f"循环发送已启动：{len(payloads)} 条，{mode_label}")
 
     def _set_loop_ui(self, active: bool):
         self._loop_active = active
@@ -428,11 +571,13 @@ class MainWindow(QMainWindow):
         geometry = settings.value("geometry")
         if geometry:
             self.restoreGeometry(geometry)
+        self._apply_theme()
 
     def _save_settings(self):
         self._settings.setValue("port", self.port_combo.currentText())
         self._settings.setValue("baudrate", self.baud_combo.currentText())
         self._settings.setValue("geometry", self.saveGeometry())
+        self._settings.setValue("theme", self._theme_name)
 
     def closeEvent(self, event):
         try:
