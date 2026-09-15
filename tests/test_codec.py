@@ -2,8 +2,11 @@ import pytest
 
 from serial_assistant.core.codec import (
     bytes_to_hex,
+    decode_text,
     encode_payload,
+    format_display,
     hex_to_bytes,
+    line_ending,
     parse_escapes,
 )
 
@@ -59,3 +62,29 @@ def test_encode_payload_modes():
     assert encode_payload("41 42", True) == b"AB"
     assert encode_payload(r"A\n", False, True) == b"A\n"
     assert encode_payload(r"A\n", False, False) == "A\\n".encode("utf-8")
+
+
+def test_decode_text_encodings():
+    data = "中文测试".encode("gbk")
+    assert decode_text(data, "gbk") == "中文测试"
+    assert decode_text(data, "utf-8") != "中文测试"
+    assert decode_text(b"ABC", "utf-8") == "ABC"
+    assert decode_text(b"\xff\xfe", "utf-8") == "\ufffd\ufffd"
+
+
+def test_format_display_modes():
+    data = b"\x01AB"
+    assert format_display(data, "hex") == "01 41 42"
+    assert format_display(data, "text", "utf-8") == "\x01AB"
+    both = format_display(data, "both", "utf-8")
+    assert both.startswith("01 41 42")
+    assert "|" in both
+    assert "AB" in both
+
+
+def test_line_ending():
+    assert line_ending("crlf") == b"\r\n"
+    assert line_ending("lf") == b"\n"
+    assert line_ending("cr") == b"\r"
+    assert line_ending("none") == b""
+    assert line_ending("unknown") == b""

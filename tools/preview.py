@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from serial_assistant.core.quicksend import QuickSlot  # noqa: E402
 from serial_assistant.core.scheduler import MessageItem  # noqa: E402
 from serial_assistant.ui.main_window import MainWindow  # noqa: E402
 
@@ -51,6 +52,13 @@ DEMO_ITEMS = [
     ),
 ]
 
+DEMO_QUICK = [
+    QuickSlot(label="读寄存器", content="01 03 00 00 00 0A", is_hex=True, checksum="crc16", hotkey="F1"),
+    QuickSlot(label="版本查询", content=r"AT+GMR\r\n", hotkey="F2"),
+    QuickSlot(label="复位", content="RESET", hotkey="F3"),
+    QuickSlot(label="心跳", content="A5 5A 01 02", is_hex=True, checksum="sum8", hotkey="F4"),
+]
+
 DEMO_LOG = [
     ("sys", "已打开 COM7 @ 115200"),
     ("tx", "01 03 00 00 00 0A C5 CD"),
@@ -70,13 +78,14 @@ def main() -> int:
     app = QApplication([])
     window = MainWindow()
     window.send_table.set_items(DEMO_ITEMS)
+    window.quick_panel.set_slots(DEMO_QUICK)
     window.tx_text.setPlainText("01 03 00 00 00 0A")
     window.mode_combo.setCurrentText("HEX")
     window.rx_text.clear()
     for kind, text in DEMO_LOG:
         window._append_line(kind, text)
     window._set_conn_state(True, "COM7 @ 115200")
-    window.resize(1180, 760)
+    window.resize(1280, 820)
 
     for name in ("dark", "light"):
         window._theme_name = name

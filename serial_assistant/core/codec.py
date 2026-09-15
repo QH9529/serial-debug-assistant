@@ -76,3 +76,42 @@ def encode_payload(text: str, is_hex: bool, use_escapes: bool = True) -> bytes:
     if use_escapes:
         return parse_escapes(text)
     return text.encode("utf-8")
+
+
+# ---------- 显示与换行 ----------
+
+DISPLAY_MODES = ("text", "hex", "both")
+ENCODINGS = ("utf-8", "gbk", "utf-16", "ascii", "latin-1")
+LINE_ENDINGS = ("none", "cr", "lf", "crlf")
+_LINE_ENDING_BYTES = {
+    "none": b"",
+    "cr": b"\r",
+    "lf": b"\n",
+    "crlf": b"\r\n",
+}
+
+
+def decode_text(data: bytes, encoding: str = "utf-8") -> str:
+    """按指定编码解码接收字节；未知编码回退 UTF-8，非法字节用替换符。"""
+    try:
+        return data.decode(encoding, errors="replace")
+    except LookupError:
+        return data.decode("utf-8", errors="replace")
+
+
+def format_display(data: bytes, mode: str = "text", encoding: str = "utf-8") -> str:
+    """把接收字节格式化为一行显示文本。
+
+    mode: text=仅文本　hex=仅十六进制　both=十六进制与文本同屏对照
+    """
+    if mode == "hex":
+        return bytes_to_hex(data)
+    text = decode_text(data, encoding)
+    if mode == "both":
+        return f"{bytes_to_hex(data)}  |  {text}"
+    return text
+
+
+def line_ending(name: str) -> bytes:
+    """换行符选项对应的字节，未知值返回空。"""
+    return _LINE_ENDING_BYTES.get(name, b"")

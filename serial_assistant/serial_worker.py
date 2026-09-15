@@ -74,6 +74,10 @@ class SerialWorker(QObject):
                 rtscts=(flow == "rtscts"),
                 timeout=0.02,
             )
+            if cfg.get("rts") is not None:
+                self._serial.rts = bool(cfg["rts"])
+            if cfg.get("dtr") is not None:
+                self._serial.dtr = bool(cfg["dtr"])
             return True
         except (SerialException, OSError, ValueError) as exc:
             self._serial = None
@@ -121,6 +125,26 @@ class SerialWorker(QObject):
             self.status_changed.emit("自动重连成功")
 
     # ---------- 收发 ----------
+    @Slot(object)
+    def set_control_lines(self, state: dict):
+        """运行时切换 RTS / DTR 电平（复位 MCU 等场景）。"""
+        if not self.is_open:
+            self.error_occurred.emit("串口未打开，无法控制 RTS/DTR")
+            return
+        try:
+            if "rts" in state:
+                self._serial.rts = bool(state["rts"])
+            if "dtr" in state:
+                self._serial.dtr = bool(state["dtr"])
+        except (SerialException, OSError, ValueError) as exc:
+            self.error_occurred.emit(f"控制线设置失败：{exc}")
+            return
+        desc = "　".join(
+            f"{key.upper()}={'ON' if bool(value) else 'OFF'}"
+            for key, value in state.items()
+        )
+        self.status_changed.emit(f"控制线已切换：{desc}")
+
     @Slot(object)
     def send_bytes(self, payload):
         data = bytes(payload)
@@ -186,6 +210,7 @@ class SerialWorkerController(QObject):
     open_requested = Signal(object)
     close_requested = Signal()
     send_requested = Signal(object)
+    control_requested = Signal(object)
     loop_requested = Signal(object)
     loop_stop_requested = Signal()
 
@@ -197,6 +222,7 @@ class SerialWorkerController(QObject):
         self.open_requested.connect(self.worker.open_port)
         self.close_requested.connect(self.worker.close_port)
         self.send_requested.connect(self.worker.send_bytes)
+        self.control_requested.connect(self.worker.set_control_lines)
         self.loop_requested.connect(self.worker.start_loop)
         self.loop_stop_requested.connect(self.worker.stop_loop)
         self._thread.finished.connect(self.worker.deleteLater)
