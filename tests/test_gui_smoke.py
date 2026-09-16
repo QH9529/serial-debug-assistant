@@ -104,6 +104,36 @@ def test_session_settings_are_per_session(windows):
     assert sessions[1].baud_combo.currentText() == "19200"
 
 
+def test_session_custom_name(windows):
+    window = windows()
+    session = window.current_session()
+    session.port_combo.addItem("COM7")
+    session.port_combo.setCurrentText("COM7")
+
+    session.set_alias("温湿度模块")
+    assert session.alias == "温湿度模块"
+    assert "温湿度模块" in session.tab_text()
+    assert "COM7" in session.tab_text()  # 串口名保留
+    assert "温湿度模块" in session.label()
+    assert "COM7" in session.label()
+    assert "温湿度模块" in window.tabs.tabText(0)
+
+    session.set_alias("")
+    assert "COM7" in session.tab_text()
+    assert "温湿度模块" not in session.tab_text()
+
+
+def test_session_name_persists(windows):
+    window = windows()
+    session = window.current_session()
+    session.set_alias("网关模块")
+    window._save_settings()
+
+    reopened = windows("settings.ini")
+    assert reopened.sessions()[0].alias == "网关模块"
+    assert "网关模块" in reopened.tabs.tabText(0)
+
+
 def test_close_session_keeps_at_least_one(windows):
     window = windows()
     assert window.tabs.count() == 1

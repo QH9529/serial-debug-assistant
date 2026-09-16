@@ -8,10 +8,12 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -106,6 +108,8 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self.close_session)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabs.customContextMenuRequested.connect(self._tab_context_menu)
         layout.addWidget(self.tabs, 1)
 
         status = self.statusBar()
@@ -125,6 +129,9 @@ class MainWindow(QMainWindow):
         self.del_btn = QPushButton("关闭会话")
         self.del_btn.setObjectName("ghost")
         self.del_btn.setToolTip("关闭当前会话（会先关闭其串口）")
+        self.rename_btn = QPushButton("重命名")
+        self.rename_btn.setObjectName("ghost")
+        self.rename_btn.setToolTip("给当前会话起一个自定义名称（标签页上会显示「名称（COMx）」）")
 
         bc_tag = QLabel("发送目标")
         bc_tag.setObjectName("hint")
@@ -149,6 +156,7 @@ class MainWindow(QMainWindow):
 
         row.addWidget(self.add_btn)
         row.addWidget(self.del_btn)
+        row.addWidget(self.rename_btn)
         row.addSpacing(10)
         row.addWidget(bc_tag)
         row.addWidget(self.broadcast_combo)
@@ -158,6 +166,7 @@ class MainWindow(QMainWindow):
 
         self.add_btn.clicked.connect(lambda: self.add_session())
         self.del_btn.clicked.connect(lambda: self.close_session(self.tabs.currentIndex()))
+        self.rename_btn.clicked.connect(self._rename_current_session)
         self.broadcast_combo.currentIndexChanged.connect(self._on_broadcast_changed)
         self.top_cb.toggled.connect(self._toggle_always_on_top)
         self.theme_btn.clicked.connect(self._toggle_theme)
@@ -218,6 +227,30 @@ class MainWindow(QMainWindow):
         self._save_settings()
         if not self._sessions:
             self.add_session()
+
+    def _rename_current_session(self):
+        session = self.current_session()
+        if session is None or not self._interactive:
+            return
+        text, ok = QInputDialog.getText(
+            self, "重命名会话", "自定义名称（留空则标签页只显示串口）：", text=session.alias
+        )
+        if ok:
+            session.set_alias(text)
+
+    def _tab_context_menu(self, pos):
+        index = self.tabs.tabBar().tabAt(pos)
+        if index < 0:
+            return
+        menu = QMenu(self)
+        rename_action = menu.addAction("重命名会话…")
+        close_action = menu.addAction("关闭会话")
+        chosen = menu.exec(self.tabs.tabBar().mapToGlobal(pos))
+        if chosen is rename_action:
+            self.tabs.setCurrentIndex(index)
+            self._rename_current_session()
+        elif chosen is close_action:
+            self.close_session(index)
 
     def _restore_sessions(self):
         count = int(self._settings.value("session_count", 1) or 1)

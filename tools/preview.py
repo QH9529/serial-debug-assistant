@@ -61,6 +61,7 @@ def main() -> int:
     first = window.current_session()
     first.send_table.set_items(DEMO_ITEMS)
     first.quick_panel.set_slots(DEMO_QUICK)
+    first.set_alias("主控模块")
     first.tx_text.setPlainText("01 03 00 00 00 0A")
     first.mode_combo.setCurrentText("HEX")
     first.rx_text.clear()
@@ -71,6 +72,7 @@ def main() -> int:
     first.period_spin.setValue(1000)
 
     second = window.add_session()
+    second.set_alias("温湿度传感器")
     second.port_combo.addItem("COM9")
     second.port_combo.setCurrentText("COM9")
     second.baud_combo.setCurrentText("9600")
@@ -79,8 +81,6 @@ def main() -> int:
     second._set_conn_state(True, "COM9 @ 9600")
     second.send_table.set_items([MessageItem(content="AA 55", interval_ms=1000, note="心跳", enabled=True)])
 
-    window.tabs.setTabText(0, "● COM7")
-    window.tabs.setTabText(1, "● COM9（转发中）")
     window.resize(1280, 820)
 
     # 会话 1 收到的数据转发到会话 2，展示「串口间转发」配置

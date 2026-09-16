@@ -137,6 +137,7 @@ class SessionWidget(QWidget):
         self._file_state = None
         self.log_dir = ""
         self.forward_target_id = ""
+        self._alias = ""
 
         self._controller = SerialWorkerController()
         self._worker = self._controller.worker
@@ -166,17 +167,38 @@ class SessionWidget(QWidget):
     def counts_text(self) -> str:
         return f"RX {self._rx_count} B  TX {self._tx_count} B"
 
+    @property
+    def alias(self) -> str:
+        """会话自定义名称（可为空）。"""
+        return self._alias
+
+    def set_alias(self, text: str):
+        text = (text or "").strip()
+        if text == self._alias:
+            return
+        self._alias = text
+        self._save_settings()
+        self.title_changed.emit()
+
     def label(self) -> str:
         port = self.port_name or "新会话"
+        if self._alias:
+            return f"#{self.session_no} {self._alias}（{port}）"
         return f"#{self.session_no} {port}"
 
     def tab_text(self) -> str:
-        port = self.port_name or "新会话"
-        return f"{'●' if self._port_open else '○'} {port}"
+        dot = "●" if self._port_open else "○"
+        port = self.port_name or "未选口"
+        if self._alias:
+            name = self._alias if len(self._alias) <= 12 else self._alias[:11] + "…"
+            return f"{dot} {name}（{port}）"
+        return f"{dot} {port}"
 
     def tab_tooltip(self) -> str:
         state = "已连接" if self._port_open else "未连接"
-        return f"{self.label()} · {self.baud_combo.currentText()} · {state}"
+        port = self.port_name or "未选择端口"
+        prefix = f"{self._alias} · " if self._alias else ""
+        return f"{prefix}{port} · {self.baud_combo.currentText()} · {state}"
 
     def set_theme(self, theme: dict):
         self._theme = theme
@@ -1296,6 +1318,7 @@ class SessionWidget(QWidget):
         self.period_spin.setValue(int(value("period_ms", 1000) or 1000))
         self.auto_send_spin.setValue(int(value("auto_send_ms", 1000) or 1000))
         self.log_dir = str(value("log_dir", "") or "")
+        self._alias = str(value("name", "") or "")
 
         self._history = history_from_raw(value("history"))
         self.quick_panel.set_slots(load_slots(value("quick_slots")))
@@ -1333,6 +1356,7 @@ class SessionWidget(QWidget):
         settings.setValue(self._group("period_ms"), self.period_spin.value())
         settings.setValue(self._group("auto_send_ms"), self.auto_send_spin.value())
         settings.setValue(self._group("log_dir"), self.log_dir)
+        settings.setValue(self._group("name"), self._alias)
         settings.setValue(self._group("quick_slots"), dump_slots(self.quick_panel.get_slots()))
         settings.setValue(self._group("history"), dump_history(self._history))
 
