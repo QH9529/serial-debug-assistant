@@ -898,6 +898,9 @@ class SessionWidget(QWidget):
         self._append_line(kind, format_display(data, mode, encoding))
         if self.pause_cb.isChecked():
             scrollbar.setValue(previous)
+        else:
+            # appendHtml 后布局未立即更新，maximum() 可能是旧值，延迟到下一轮事件循环再滚到底
+            QTimer.singleShot(0, scrollbar.setValue, scrollbar.maximum())
 
     def _on_data_received(self, payload):
         data = bytes(payload)

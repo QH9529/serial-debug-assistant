@@ -33,6 +33,7 @@ class SerialWorker(QObject):
     READ_INTERVAL_MS = 20
     LOOP_TICK_MS = 5
     RECONNECT_MS = 2000
+    READ_ERROR_TOLERANCE = 5
 
     def __init__(self):
         super().__init__()
@@ -43,6 +44,7 @@ class SerialWorker(QObject):
         self._payloads = {}
         self._row_map = []
         self._last_reconnect_notice = 0.0
+        self._read_errors = 0
         self._read_timer = QTimer(self)
         self._read_timer.setInterval(self.READ_INTERVAL_MS)
         self._read_timer.timeout.connect(self._poll_read)
@@ -85,6 +87,7 @@ class SerialWorker(QObject):
                 self._serial.rts = bool(cfg["rts"])
             if cfg.get("dtr") is not None:
                 self._serial.dtr = bool(cfg["dtr"])
+            self._read_errors = 0
             return True
         except (SerialException, OSError, ValueError) as exc:
             self._serial = None
@@ -181,7 +184,15 @@ class SerialWorker(QObject):
                 data = self._serial.read(waiting)
                 if data:
                     self.data_received.emit(bytes(data))
+            self._read_errors = 0
         except (SerialException, OSError) as exc:
+            # Windows 上句柄被抢占 / 设备重枚举时，ClearCommError 可能
+            # 瞬时返回拒绝访问（PermissionError 13, winerror 5）。
+            # 连续多次失败才判定连接丢失，避免瞬时抖动误报。
+            self._read_errors += 1
+            if self._read_errors < self.READ_ERROR_TOLERANCE:
+                return
+            self._read_errors = 0
             self.error_occurred.emit(f"读取失败：{exc}")
             self._on_lost("串口连接丢失")
 
