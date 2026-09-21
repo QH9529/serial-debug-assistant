@@ -787,8 +787,22 @@ class SessionWidget(QWidget):
         if self._port_open:
             self.param_hint.setText("参数已改，需重开端口生效")
 
+    def _confirm_disconnect(self) -> bool:
+        if not self._interactive:
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle("关闭串口")
+        box.setText(f"串口 {self.port_name} 正在打开，确定关闭？")
+        box.setIcon(QMessageBox.Question)
+        yes = box.addButton("关闭", QMessageBox.AcceptRole)
+        box.addButton("取消", QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is yes
+
     def _toggle_port(self):
         if self._port_open:
+            if not self._confirm_disconnect():
+                return
             self._controller.loop_stop_requested.emit()
             self._set_loop_ui(False)
             self._controller.close_requested.emit()

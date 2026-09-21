@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -211,10 +212,30 @@ class MainWindow(QMainWindow):
         self._refresh_counts_label()
         return session
 
+    def _confirm_close(self, title: str, text: str) -> bool:
+        """关闭串口前确认；非交互模式（测试）下直接放行。"""
+        if not self._interactive:
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setIcon(QMessageBox.Question)
+        yes = box.addButton("关闭", QMessageBox.AcceptRole)
+        box.addButton("取消", QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is yes
+
     def close_session(self, index: int):
         if index < 0 or index >= self.tabs.count():
             return
         session = self.tabs.widget(index)
+        if isinstance(session, SessionWidget):
+            if session.is_open:
+                text = f"会话「{session.label()}」的串口正在打开，确定关闭该会话？"
+            else:
+                text = f"确定关闭会话「{session.label()}」？"
+            if not self._confirm_close("关闭会话", text):
+                return
         self.tabs.removeTab(index)
         if isinstance(session, SessionWidget):
             session.shutdown()
@@ -375,6 +396,14 @@ class MainWindow(QMainWindow):
             session._save_settings()
 
     def closeEvent(self, event):
+        open_sessions = [s for s in self._sessions if s.is_open]
+        if open_sessions:
+            text = f"当前有 {len(open_sessions)} 个串口正在打开，退出将全部关闭，确定退出？"
+        else:
+            text = "确定退出程序？"
+        if not self._confirm_close("退出程序", text):
+            event.ignore()
+            return
         try:
             for session in list(self._sessions):
                 session.shutdown()
